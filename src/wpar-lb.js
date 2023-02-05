@@ -2,8 +2,8 @@ import axios from "axios";
 import cheerio from "cheerio";
 import moment from "moment";
 
-export default async function getWpraLb() {
-  const url = "https://www.wpra.com/standings-pro-rodeo-breakaway-world/";
+export default async function getWpraLb(year = 2023) {
+  const url = `https://archived.wpra.com/index.php/standings-group-season?group=Roping%20Standings&season=${year}&standing=${year}%20Pro%20Rodeo%20Breakaway%20World%20Standings`;
   const response = await axios.get(url);
   const html = response.data;
 
@@ -33,7 +33,7 @@ export default async function getWpraLb() {
     const Event = "LB";
     const Type = "world";
     const Points = Earnings;
-    const SeasonYear = Number(moment().format("yyyy"));
+    const SeasonYear = Number(year);
     const StandingId = 0;
     const ContestantId = 0;
 

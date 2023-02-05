@@ -5,15 +5,19 @@ import getWpraBr from "./src/wpra-br.js";
 
 const app = express();
 
-const brStandings = await getWpraBr();
+app.get("/wpra-br/:year", async (req, res) => {
+  const year = req.params.year;
 
-app.get("/wpra-br", (req, res) => {
+  const brStandings = await getWpraBr(year);
+
   res.json(brStandings);
 });
 
-const lbStandings = await getWpraLb();
+app.get("/wpra-lb/:year", async (req, res) => {
+  const year = req.params.year;
 
-app.get("/wpra-lb", (req, res) => {
+  const lbStandings = await getWpraLb(year);
+
   res.json(lbStandings);
 });
 
