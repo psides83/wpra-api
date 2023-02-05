@@ -8,13 +8,13 @@ const app = express();
 const brStandings = await getWpraBr();
 
 app.get("/wpra-br", (req, res) => {
-  res.json(brStandings.slice(1, 51));
+  res.json(brStandings);
 });
 
 const lbStandings = await getWpraLb();
 
 app.get("/wpra-lb", (req, res) => {
-  res.json(lbStandings.slice(1, 51));
+  res.json(lbStandings);
 });
 
 // todo PORT running

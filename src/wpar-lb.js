@@ -16,7 +16,7 @@ export default async function getWpraLb() {
   const rows = table.find("tr");
   console.log(table);
 
-  var data = [];
+  var rawData = [];
 
   // Iterate over the rows and get the values from the 1st and 9th columns
   rows.each((i, row) => {
@@ -31,9 +31,11 @@ export default async function getWpraLb() {
     const earnings = parseFloat(earningsRaw.replace(/,/g, "").replace("$", ""));
 
     if (name) {
-      data.push({ place, firstName, lastName, hometown, earnings });
+      rawData.push({ place, firstName, lastName, hometown, earnings });
     }
   });
+
+  const data = rawData.slice(1, 51);
 
   const error = null;
 
