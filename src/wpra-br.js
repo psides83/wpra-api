@@ -21,17 +21,17 @@ export default async function getWpraBr() {
   // Iterate over the rows and get the values from the 1st and 9th columns
   rows.each((i, row) => {
     const rankRaw = $(row).find("td:nth-child(1)").text();
-    const place = Number(rankRaw);
+    const Place = Number(rankRaw);
     const nameRaw = $(row).find("td:nth-child(2)").text();
     const name = nameRaw.split(" ").filter((name) => !name.includes("("));
-    const firstName = name[0];
-    const lastName = name[name.length - 1];
-    const hometown = $(row).find("td:nth-child(3)").text();
+    const FirstName = name[0];
+    const LastName = name[name.length - 1];
+    const Hometown = $(row).find("td:nth-child(3)").text();
     const earningsRaw = $(row).find("td:nth-child(4)").text();
-    const earnings = parseFloat(earningsRaw.replace(/,/g, "").replace("$", ""));
+    const Earnings = parseFloat(earningsRaw.replace(/,/g, "").replace("$", ""));
 
     if (name) {
-      rawData.push({ place, firstName, lastName, hometown, earnings });
+      rawData.push({ Place, FirstName, LastName, Hometown, Earnings });
     }
   });
 
