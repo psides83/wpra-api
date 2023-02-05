@@ -1,5 +1,6 @@
 import axios from "axios";
 import cheerio from "cheerio";
+import moment from "moment";
 
 export default async function getWpraBr() {
   const url = "https://www.wpra.com/standings-pro-rodeo-world/";
@@ -29,9 +30,27 @@ export default async function getWpraBr() {
     const Hometown = $(row).find("td:nth-child(3)").text();
     const earningsRaw = $(row).find("td:nth-child(4)").text();
     const Earnings = parseFloat(earningsRaw.replace(/,/g, "").replace("$", ""));
+    const Event = "GB";
+    const Type = "world";
+    const Points = Earnings;
+    const SeasonYear = Number(moment().format("yyyy"));
+    const StandingId = 0;
+    const ContestantId = 0;
 
     if (name) {
-      rawData.push({ Place, FirstName, LastName, Hometown, Earnings });
+      rawData.push({
+        ContestantId,
+        Place,
+        FirstName,
+        LastName,
+        Hometown,
+        Earnings,
+        Event,
+        Type,
+        Points,
+        SeasonYear,
+        StandingId,
+      });
     }
   });
 
