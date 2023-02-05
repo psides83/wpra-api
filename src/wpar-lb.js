@@ -21,7 +21,7 @@ export default async function getWpraLb() {
   // Iterate over the rows and get the values from the 1st and 9th columns
   rows.each((i, row) => {
     const rankRaw = $(row).find("td:nth-child(1)").text();
-    const rank = Number(rankRaw);
+    const place = Number(rankRaw);
     const nameRaw = $(row).find("td:nth-child(2)").text();
     const name = nameRaw.split(" ").filter((name) => !name.includes("("));
     const firstName = name[0];
@@ -31,7 +31,7 @@ export default async function getWpraLb() {
     const earnings = parseFloat(earningsRaw.replace(/,/g, "").replace("$", ""));
 
     if (name) {
-      standings.push({ rank, firstName, lastName, hometown, earnings });
+      standings.push({ place, firstName, lastName, hometown, earnings });
     }
   });
 
