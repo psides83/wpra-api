@@ -96,7 +96,7 @@ export default async function getWpra(event, type, year, circuit) {
     }
   });
 
-  const data = rawData.slice(1, 51);
+  const data = rawData.slice(1, 51).filter((position) => position.Place !== 0);
 
   const error = null;
 
