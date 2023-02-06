@@ -107,7 +107,7 @@ export default async function getWpra(event, type, year, circuit) {
 
     return { error, data };
   } else {
-    const error = "bad url";
+    const error = null;
 
     return { error, data: [] };
   }
