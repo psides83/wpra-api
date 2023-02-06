@@ -42,7 +42,7 @@ export default async function getWpra(event, type, year, circuit) {
     if (event === EVENTS.LB && type === TYPE.WORLD)
       return `https://archived.wpra.com/index.php/standings-group-season?group=Roping%20Standings&season=${year}&standing=${year}%20Pro%20Rodeo%20Breakaway%20World%20Standings`;
     if (event === EVENTS.LB && type === TYPE.CIRCUIT)
-      return `https://archived.wpra.com/index.php/standings-group-season?group=Roping%20Standings&season=${year}&standing=${year}%20Breakaway%20${circuit}%20Circuit%20Standings`;
+      return `https://archived.wpra.com/index.php/standings-group-season?group=Roping%20Standings&season=${year}&standing=${year}%20Pro%20Rodeo%20Breakaway%20${circuit}%20Circuit%20Standings`;
   }
 
   console.log(event, type, year);
