@@ -4,6 +4,7 @@ import getWpra from "./src/wpra.js";
 
 const app = express();
 
+// get wrpa standings
 app.get("/:event/:type/:year/:circuit?", async (req, res) => {
   const { event, type, year, circuit } = req.params;
 
