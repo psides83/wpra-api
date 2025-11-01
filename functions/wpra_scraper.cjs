@@ -24,8 +24,11 @@ const CIRCUITS = {
   BRAZIL: { title: "Brazil", id: 15 },
 };
 
-const DATA_DIR = path.join(__dirname, "data");
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR);
+const outputDir = "/Users/Payton/web-development/rodeo-daily-resources/wpra"; // or /Users/Payton/Documents/WPRA/
+const filePath = `${outputDir}/BR-world-2025.json`;
+
+// const DATA_DIR = path.join(__dirname, "wpra");
+if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
 
 const DELAY_MS = 3000;
 
@@ -115,7 +118,7 @@ async function runAll() {
         for (const circuit of circuits) {
           for (let year = startYear; year <= currentYear; year++) {
             const filename = path.join(
-              DATA_DIR,
+              outputDir,
               `standings?year=${year}&type=${type}&id=${circuit.id}&event=${event}.json`
             );
 
@@ -142,7 +145,7 @@ async function runAll() {
       } else {
         for (let year = startYear; year <= currentYear; year++) {
           const filename = path.join(
-            DATA_DIR,
+            outputDir,
             `standings?year=${year}&type=${type}&id=&event=${event}.json`
           );
 
