@@ -9,11 +9,11 @@
   "license": "ISC",
   "dependencies": {
     "axios": "^0.21.4",
-    "cheerio": "^1.0.0-rc.10",
+    "cheerio": "^1.1.2",
     "express": "^4.17.1",
     "moment": "^2.29.4",
     "nodemon": "^2.0.20"
   },
-  "type": "module",
+  "keywords": [],
   "description": ""
 }
