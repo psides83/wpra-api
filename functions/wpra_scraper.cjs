@@ -20,31 +20,73 @@ const CIRCUITS = {
   TEXAS: { title: "Texas", id: 7 },
   TURQUOISE: { title: "Turquoise", id: 6 },
   WILDERNESS: { title: "Wilderness", id: 3 },
-  MEXICO: { title: "Mexico", id: 14 },
-  BRAZIL: { title: "Brazil", id: 15 },
+  // MEXICO: { title: "Mexico", id: 14 },
+  // BRAZIL: { title: "Brazil", id: 15 },
 };
 
-const outputDir = "/Users/Payton/web-development/rodeo-daily-resources/wpra"; // or /Users/Payton/Documents/WPRA/
-const filePath = `${outputDir}/BR-world-2025.json`;
+const outputDir = "/Users/Payton/web-development/wpra-json";
 
-// const DATA_DIR = path.join(__dirname, "wpra");
 if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
 
 const DELAY_MS = 3000;
 
-// ---- Original getWpra function unchanged ----
+// ---- Helpers ----
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function progressBar(current, total) {
+  const percent = Math.floor((current / total) * 100);
+  const filled = "█".repeat(Math.floor(percent / 4));
+  const empty = "░".repeat(25 - Math.floor(percent / 4));
+  process.stdout.write(`\rProgress: [${filled}${empty}] ${percent}%`);
+}
+
+function writeTimestampHTML() {
+  const timestamp = new Date().toLocaleString();
+  const htmlPath = path.join(outputDir, "index.html");
+  fs.writeFileSync(htmlPath, `<p>Last updated: ${timestamp}</p>\n`, "utf-8");
+  console.log(`\n🕒 Updated timestamp file: ${htmlPath}`);
+}
+
+// ---- Scraper ----
 async function getWpra(event, type, year, circuit) {
+  const currentYear = new Date().getFullYear();
+
   function url() {
+    if (event === EVENTS.GB && type === TYPE.WORLD && year === currentYear)
+      return `https://wpra.com/pro-rodeo-world-standings-${currentYear}/`;
+
+    if (event === EVENTS.GB && type === TYPE.ROOKIE && year === currentYear)
+      return `https://wpra.com/wpra-resistol-rookie-barrels-${currentYear}/`;
+
+    if (event === EVENTS.LB && type === TYPE.WORLD && year === currentYear)
+      return `https://wpra.com/pro-rodeo-breakaway-world-standings-${currentYear}/`;
+
+    if (event === EVENTS.LB && type === TYPE.ROOKIE && year === currentYear)
+      return `https://wpra.com/wpra-resistol-rookie-breakaway-${currentYear}/`;
+
+    if (event === EVENTS.GB && type === TYPE.CIRCUIT && year === currentYear)
+      return `https://wpra.com/pro-rodeo-circuit-standings-${circuit.toLowerCase()}-${currentYear}/`;
+
+    if (event === EVENTS.LB && type === TYPE.CIRCUIT && year === currentYear)
+      return `https://wpra.com/pro-rodeo-breakaway-circuit-standings-${circuit.toLowerCase()}-${currentYear}/`;
+
     if (event === EVENTS.GB && type === TYPE.WORLD)
       return `https://archived.wpra.com/index.php/standings-group-season?group=Pro%20Rodeo%20-%20World&season=${year}&standing=${year}%20Pro%20Rodeo%20World%20Standings`;
+
     if (event === EVENTS.GB && type === TYPE.ROOKIE)
       return `https://archived.wpra.com/index.php/standings-group-season?group=Rookie%20Standings&season=${year}&standing=${year}%20Rookie%20Standings`;
+
     if (event === EVENTS.GB && type === TYPE.CIRCUIT)
       return `https://archived.wpra.com/index.php/standings-group-season?group=Pro%20Rodeo-Circuit&season=${year}&standing=${year}%20Pro%20Rodeo%20${circuit}%20Circuit%20Standings`;
+
     if (event === EVENTS.LB && type === TYPE.WORLD)
       return `https://archived.wpra.com/index.php/standings-group-season?group=Roping%20Standings&season=${year}&standing=${year}%20Pro%20Rodeo%20Breakaway%20World%20Standings`;
+
     if (event === EVENTS.LB && type === TYPE.CIRCUIT)
       return `https://archived.wpra.com/index.php/standings-group-season?group=Roping%20Standings&season=${year}&standing=${year}%20Pro%20Rodeo%20Breakaway%20${circuit}%20Circuit%20Standings`;
+
     return null;
   }
 
@@ -52,11 +94,9 @@ async function getWpra(event, type, year, circuit) {
   if (!targetUrl) return { error: "Invalid params", data: [] };
 
   const response = await axios.get(targetUrl);
-  const html = response.data;
-  const $ = cheerio.load(html);
-  const table = $("table");
-  const rows = table.find("tr");
-  let rawData = [];
+  const $ = cheerio.load(response.data);
+  const rows = $("table tr");
+  const rawData = [];
 
   rows.each((i, row) => {
     const rankRaw = $(row).find("td:nth-child(1)").text();
@@ -68,8 +108,8 @@ async function getWpra(event, type, year, circuit) {
     const Hometown = $(row).find("td:nth-child(3)").text();
     const earningsRaw = $(row).find("td:nth-child(4)").text();
     const Earnings = parseFloat(earningsRaw.replace(/,/g, "").replace("$", ""));
-    const Event = "GB";
-    const Type = "world";
+    const Event = event;
+    const Type = type;
     const Points = Earnings;
     const SeasonYear = Number(year);
     const StandingId = 0;
@@ -92,16 +132,11 @@ async function getWpra(event, type, year, circuit) {
     }
   });
 
-  const data = rawData.slice(1, 51).filter((position) => position.Place !== 0);
+  const data = rawData.slice(1, 51).filter((p) => p.Place !== 0);
   return { error: null, data };
 }
 
-// ---- delay helper ----
-function delay(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-// ---- runner ----
+// ---- Runner ----
 async function runAll() {
   const currentYear = new Date().getFullYear();
   const startYearDefault = 2014;
@@ -110,6 +145,22 @@ async function runAll() {
   const events = Object.values(EVENTS);
   const types = Object.values(TYPE);
 
+  // Compute total tasks
+  let totalTasks = 0;
+  for (const event of events) {
+    const startYear = event === EVENTS.LB ? lbStartYear : startYearDefault;
+    for (const type of types) {
+      if (type === TYPE.CIRCUIT) {
+        totalTasks += circuits.length * (currentYear - startYear + 1);
+      } else {
+        totalTasks += currentYear - startYear + 1;
+      }
+    }
+  }
+
+  let completed = 0;
+
+  // Actual run
   for (const event of events) {
     const startYear = event === EVENTS.LB ? lbStartYear : startYearDefault;
 
@@ -119,11 +170,12 @@ async function runAll() {
           for (let year = startYear; year <= currentYear; year++) {
             const filename = path.join(
               outputDir,
-              `standings?year=${year}&type=${type}&id=${circuit.id}&event=${event}.json`
+              `standings-year=${year}&type=${type}&id=${circuit.id}&event=${event}.json`,
             );
 
             if (year !== currentYear && fs.existsSync(filename)) {
-              console.log(`⏭️ Skipping existing: ${filename}`);
+              completed++;
+              progressBar(completed, totalTasks);
               continue;
             }
 
@@ -131,14 +183,14 @@ async function runAll() {
               event,
               type,
               year,
-              circuit.title
+              circuit.title,
             );
             fs.writeFileSync(
               filename,
               JSON.stringify({ error, data }, null, 2),
-              "utf-8"
             );
-            console.log(`✅ Saved: ${filename}`);
+            completed++;
+            progressBar(completed, totalTasks);
             await delay(DELAY_MS);
           }
         }
@@ -146,29 +198,28 @@ async function runAll() {
         for (let year = startYear; year <= currentYear; year++) {
           const filename = path.join(
             outputDir,
-            `standings?year=${year}&type=${type}&id=&event=${event}.json`
+            `standings-year=${year}&type=${type}&id=&event=${event}.json`,
           );
 
           if (year !== currentYear && fs.existsSync(filename)) {
-            console.log(`⏭️ Skipping existing: ${filename}`);
+            completed++;
+            progressBar(completed, totalTasks);
             continue;
           }
 
           const { error, data } = await getWpra(event, type, year);
-          fs.writeFileSync(
-            filename,
-            JSON.stringify({ error, data }, null, 2),
-            "utf-8"
-          );
-          console.log(`✅ Saved: ${filename}`);
+          fs.writeFileSync(filename, JSON.stringify({ error, data }, null, 2));
+          completed++;
+          progressBar(completed, totalTasks);
           await delay(DELAY_MS);
         }
       }
     }
   }
 
-  console.log("🏁 All scraping complete!");
+  process.stdout.write("\n🏁 All scraping complete!\n");
+  writeTimestampHTML();
 }
 
-// ---- run ----
+// ---- Run ----
 runAll().catch(console.error);
