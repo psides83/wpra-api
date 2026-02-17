@@ -24,7 +24,9 @@ const CIRCUITS = {
   // BRAZIL: { title: "Brazil", id: 15 },
 };
 
-const outputDir = "/Users/Payton/web-development/wpra-json";
+const outputDir =
+  process.env.WPRA_OUTPUT_DIR ||
+  path.resolve(__dirname, "data");
 
 if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
 
