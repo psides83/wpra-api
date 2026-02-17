@@ -51,6 +51,18 @@ function writeTimestampHTML() {
   console.log(`\n🕒 Updated timestamp file: ${htmlPath}`);
 }
 
+function hasExistingOutput(year, type, id, event) {
+  const modernName = path.join(
+    outputDir,
+    `standings-year=${year}&type=${type}&id=${id}&event=${event}.json`,
+  );
+  const legacyName = path.join(
+    outputDir,
+    `standings?year=${year}&type=${type}&id=${id}&event=${event}.json`,
+  );
+  return fs.existsSync(modernName) || fs.existsSync(legacyName);
+}
+
 // ---- Scraper ----
 async function getWpra(event, type, year, circuit) {
   const currentYear = new Date().getFullYear();
@@ -175,7 +187,10 @@ async function runAll() {
               `standings-year=${year}&type=${type}&id=${circuit.id}&event=${event}.json`,
             );
 
-            if (year !== currentYear && fs.existsSync(filename)) {
+            if (
+              year !== currentYear &&
+              hasExistingOutput(year, type, circuit.id, event)
+            ) {
               completed++;
               progressBar(completed, totalTasks);
               continue;
@@ -203,7 +218,7 @@ async function runAll() {
             `standings-year=${year}&type=${type}&id=&event=${event}.json`,
           );
 
-          if (year !== currentYear && fs.existsSync(filename)) {
+          if (year !== currentYear && hasExistingOutput(year, type, "", event)) {
             completed++;
             progressBar(completed, totalTasks);
             continue;
