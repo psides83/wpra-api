@@ -45,9 +45,17 @@ function progressBar(current, total) {
 }
 
 function writeTimestampHTML() {
-  const timestamp = new Date().toLocaleString();
+  const timestamp = new Date().toLocaleString("en-US", {
+    timeZone: "America/Chicago",
+    dateStyle: "medium",
+    timeStyle: "long",
+  });
   const htmlPath = path.join(outputDir, "index.html");
-  fs.writeFileSync(htmlPath, `<p>Last updated: ${timestamp}</p>\n`, "utf-8");
+  fs.writeFileSync(
+    htmlPath,
+    `<p>Last updated: ${timestamp} (Central Time)</p>\n`,
+    "utf-8",
+  );
   console.log(`\n🕒 Updated timestamp file: ${htmlPath}`);
 }
 
