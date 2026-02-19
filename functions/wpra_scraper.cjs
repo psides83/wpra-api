@@ -121,15 +121,27 @@ async function getWpra(event, type, year, circuit) {
   const rawData = [];
 
   rows.each((i, row) => {
-    const rankRaw = $(row).find("td:nth-child(1)").text();
-    const Place = Number(rankRaw.replace(" (T)", ""));
-    const nameRaw = $(row).find("td:nth-child(2)").text();
-    const name = nameRaw.split(" ").filter((name) => !name.includes("("));
+    const rankRaw = $(row).find("td:nth-child(1)").text().trim();
+    const placeValue = Number(rankRaw.replace(" (T)", "").trim());
+    if (!Number.isFinite(placeValue) || placeValue <= 0) return;
+
+    const nameRaw = $(row).find("td:nth-child(2)").text().trim();
+    const name = nameRaw
+      .split(/\s+/)
+      .filter((part) => part && !part.includes("("));
     const FirstName = name[0];
     const LastName = name[name.length - 1];
-    const Hometown = $(row).find("td:nth-child(3)").text();
-    const earningsRaw = $(row).find("td:nth-child(4)").text();
-    const Earnings = parseFloat(earningsRaw.replace(/,/g, "").replace("$", ""));
+    if (!FirstName || !LastName) return;
+
+    const Hometown = $(row).find("td:nth-child(3)").text().trim();
+    const earningsRaw = $(row).find("td:nth-child(4)").text().trim();
+    const earningsValue = parseFloat(
+      earningsRaw.replace(/,/g, "").replace("$", ""),
+    );
+    if (!Number.isFinite(earningsValue)) return;
+
+    const Place = placeValue;
+    const Earnings = earningsValue;
     const Event = event;
     const Type = type;
     const Points = Earnings;
@@ -137,24 +149,22 @@ async function getWpra(event, type, year, circuit) {
     const StandingId = 0;
     const ContestantId = 0;
 
-    if (name) {
-      rawData.push({
-        ContestantId,
-        Place,
-        FirstName,
-        LastName,
-        Hometown,
-        Earnings,
-        Event,
-        Type,
-        Points,
-        SeasonYear,
-        StandingId,
-      });
-    }
+    rawData.push({
+      ContestantId,
+      Place,
+      FirstName,
+      LastName,
+      Hometown,
+      Earnings,
+      Event,
+      Type,
+      Points,
+      SeasonYear,
+      StandingId,
+    });
   });
 
-  const data = rawData.slice(1, 51).filter((p) => p.Place !== 0);
+  const data = rawData.slice(0, 50);
   return { error: null, data };
 }
 
