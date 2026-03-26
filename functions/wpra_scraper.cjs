@@ -115,7 +115,24 @@ async function getWpra(event, type, year, circuit) {
   const targetUrl = url();
   if (!targetUrl) return { error: "Invalid params", data: [] };
 
-  const response = await axios.get(targetUrl);
+  let response;
+  try {
+    response = await axios.get(targetUrl, {
+      timeout: 15000,
+      validateStatus: (status) => status < 500,
+    });
+  } catch (err) {
+    const message = err?.message || "Request failed";
+    console.warn(`Request error for ${targetUrl}: ${message}`);
+    return { error: message, data: [] };
+  }
+
+  if (response.status >= 400) {
+    const message = `HTTP ${response.status} for ${targetUrl}`;
+    console.warn(message);
+    return { error: message, data: [] };
+  }
+
   const $ = cheerio.load(response.data);
   const rows = $("table tr");
   const rawData = [];
