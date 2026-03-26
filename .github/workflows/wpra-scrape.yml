@@ -17,19 +17,19 @@ jobs:
 
     steps:
       - name: Checkout scraper repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           persist-credentials: false
 
       - name: Checkout data repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: psides83/wpra-json
           token: ${{ secrets.WPRA_JSON_REPO_TOKEN }}
           path: wpra-json
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 20
           cache: npm
