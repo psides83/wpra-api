@@ -23,6 +23,21 @@ const CIRCUITS = {
   // MEXICO: { title: "Mexico", id: 14 },
   // BRAZIL: { title: "Brazil", id: 15 },
 };
+const CIRCUIT_SVC_MODIFIERS = {
+  badlands: "bl",
+  california: "ca",
+  "columbia river": "cr",
+  "first frontier": "ff",
+  "great lakes": "gl",
+  "maple leaf": "ml",
+  montana: "mt",
+  "mountain states": "ms",
+  prairie: "pr",
+  southeastern: "se",
+  texas: "tx",
+  turquoise: "tq",
+  wilderness: "wi",
+};
 
 const outputDir =
   process.env.WPRA_OUTPUT_DIR ||
@@ -74,9 +89,13 @@ function hasExistingOutput(year, type, id, event) {
 // ---- Scraper ----
 async function getWpra(event, type, year, circuit) {
   const currentYear = new Date().getFullYear();
-  const modernCircuitSlug = decodeURIComponent(circuit || "")
+  const circuitName = decodeURIComponent(circuit || "")
+    .toLowerCase()
+    .trim();
+  const modernCircuitSlug = circuitName
     .toLowerCase()
     .replace(/\s+/g, "-");
+  const circuitSvcModifier = CIRCUIT_SVC_MODIFIERS[circuitName];
 
   function urls() {
     if (event === EVENTS.GB && type === TYPE.WORLD && year === currentYear) {
@@ -89,8 +108,7 @@ async function getWpra(event, type, year, circuit) {
 
     if (event === EVENTS.GB && type === TYPE.ROOKIE && year === currentYear) {
       return [
-        "https://wpra.com/wpra-resistol-rookie-standings/?svcUrl=pro-gb-rookie",
-        "https://wpra.com/wpra-resistol-rookie-standings/",
+        "https://wpra.com/wpra-resistol-rookie-barrels/?svcUrl=pro-gb-world-rk",
         `https://wpra.com/wpra-resistol-rookie-barrels-${currentYear}/`,
         `https://wpra.com/wpra-resistol-rookie-${currentYear}/`,
       ];
@@ -98,7 +116,7 @@ async function getWpra(event, type, year, circuit) {
 
     if (event === EVENTS.LB && type === TYPE.WORLD && year === currentYear) {
       return [
-        "https://wpra.com/pro-rodeo-breakaway-world-standings/?svcUrl=pro-lb-world",
+        "https://wpra.com/pro-rodeo-breakaway-world-standings/?svcUrl=pro-lbk-world",
         `https://wpra.com/pro-rodeo-breakaway-world-standings-${currentYear}/`,
         "https://wpra.com/pro-rodeo-breakaway-world-standings/",
       ];
@@ -106,16 +124,18 @@ async function getWpra(event, type, year, circuit) {
 
     if (event === EVENTS.LB && type === TYPE.ROOKIE && year === currentYear) {
       return [
-        "https://wpra.com/wpra-resistol-rookie-standings/?svcUrl=pro-lb-rookie",
-        "https://wpra.com/wpra-resistol-rookie-standings/",
+        "https://wpra.com/wpra-resistol-rookie-breakaway/?svcUrl=pro-lbk-world-rk",
         `https://wpra.com/wpra-resistol-rookie-breakaway-${currentYear}/`,
       ];
     }
 
     if (event === EVENTS.GB && type === TYPE.CIRCUIT && year === currentYear) {
       return [
-        `https://wpra.com/pro-rodeo-circuit-standings/?svcUrl=pro-gb-circuit-${modernCircuitSlug}`,
-        `https://wpra.com/pro-rodeo-circuit-standings/?svcUrl=pro-gb-circuit-${(circuit || "").toLowerCase()}`,
+        ...(circuitSvcModifier
+          ? [
+              `https://wpra.com/pro-rodeo-circuit-standings/?svcUrl=pro-gb-${circuitSvcModifier}`,
+            ]
+          : []),
         "https://wpra.com/pro-rodeo-circuit-standings/",
         `https://wpra.com/pro-rodeo-circuit-standings-${modernCircuitSlug}-${currentYear}/`,
       ];
@@ -123,8 +143,11 @@ async function getWpra(event, type, year, circuit) {
 
     if (event === EVENTS.LB && type === TYPE.CIRCUIT && year === currentYear) {
       return [
-        `https://wpra.com/pro-rodeo-breakaway-circuit-standings/?svcUrl=pro-lb-circuit-${modernCircuitSlug}`,
-        `https://wpra.com/pro-rodeo-breakaway-circuit-standings/?svcUrl=pro-lb-circuit-${(circuit || "").toLowerCase()}`,
+        ...(circuitSvcModifier
+          ? [
+              `https://wpra.com/pro-rodeo-breakaway-circuit-standings/?svcUrl=pro-lbk-${circuitSvcModifier}`,
+            ]
+          : []),
         "https://wpra.com/pro-rodeo-breakaway-circuit-standings/",
         `https://wpra.com/pro-rodeo-breakaway-circuit-standings-${modernCircuitSlug}-${currentYear}/`,
       ];
