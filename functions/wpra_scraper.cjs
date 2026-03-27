@@ -81,45 +81,52 @@ async function getWpra(event, type, year, circuit) {
   function urls() {
     if (event === EVENTS.GB && type === TYPE.WORLD && year === currentYear) {
       return [
+        "https://wpra.com/pro-rodeo-world-standings/?svcUrl=pro-gb-world",
         `https://wpra.com/pro-rodeo-world-standings-${currentYear}/`,
-        `https://wpra.com/pro-rodeo-world-standings-${currentYear - 1}/`,
+        "https://wpra.com/pro-rodeo-world-standings/",
       ];
     }
 
     if (event === EVENTS.GB && type === TYPE.ROOKIE && year === currentYear) {
       return [
+        "https://wpra.com/wpra-resistol-rookie-standings/?svcUrl=pro-gb-rookie",
+        "https://wpra.com/wpra-resistol-rookie-standings/",
         `https://wpra.com/wpra-resistol-rookie-barrels-${currentYear}/`,
         `https://wpra.com/wpra-resistol-rookie-${currentYear}/`,
-        `https://wpra.com/wpra-resistol-rookie-barrels-${currentYear - 1}/`,
-        `https://wpra.com/wpra-resistol-rookie-${currentYear - 1}/`,
       ];
     }
 
     if (event === EVENTS.LB && type === TYPE.WORLD && year === currentYear) {
       return [
+        "https://wpra.com/pro-rodeo-breakaway-world-standings/?svcUrl=pro-lb-world",
         `https://wpra.com/pro-rodeo-breakaway-world-standings-${currentYear}/`,
-        `https://wpra.com/pro-rodeo-breakaway-world-standings-${currentYear - 1}/`,
+        "https://wpra.com/pro-rodeo-breakaway-world-standings/",
       ];
     }
 
     if (event === EVENTS.LB && type === TYPE.ROOKIE && year === currentYear) {
       return [
+        "https://wpra.com/wpra-resistol-rookie-standings/?svcUrl=pro-lb-rookie",
+        "https://wpra.com/wpra-resistol-rookie-standings/",
         `https://wpra.com/wpra-resistol-rookie-breakaway-${currentYear}/`,
-        `https://wpra.com/wpra-resistol-rookie-breakaway-${currentYear - 1}/`,
       ];
     }
 
     if (event === EVENTS.GB && type === TYPE.CIRCUIT && year === currentYear) {
       return [
+        `https://wpra.com/pro-rodeo-circuit-standings/?svcUrl=pro-gb-circuit-${modernCircuitSlug}`,
+        `https://wpra.com/pro-rodeo-circuit-standings/?svcUrl=pro-gb-circuit-${(circuit || "").toLowerCase()}`,
+        "https://wpra.com/pro-rodeo-circuit-standings/",
         `https://wpra.com/pro-rodeo-circuit-standings-${modernCircuitSlug}-${currentYear}/`,
-        `https://wpra.com/pro-rodeo-circuit-standings-${modernCircuitSlug}-${currentYear - 1}/`,
       ];
     }
 
     if (event === EVENTS.LB && type === TYPE.CIRCUIT && year === currentYear) {
       return [
+        `https://wpra.com/pro-rodeo-breakaway-circuit-standings/?svcUrl=pro-lb-circuit-${modernCircuitSlug}`,
+        `https://wpra.com/pro-rodeo-breakaway-circuit-standings/?svcUrl=pro-lb-circuit-${(circuit || "").toLowerCase()}`,
+        "https://wpra.com/pro-rodeo-breakaway-circuit-standings/",
         `https://wpra.com/pro-rodeo-breakaway-circuit-standings-${modernCircuitSlug}-${currentYear}/`,
-        `https://wpra.com/pro-rodeo-breakaway-circuit-standings-${modernCircuitSlug}-${currentYear - 1}/`,
       ];
     }
 
