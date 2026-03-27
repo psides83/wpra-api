@@ -74,63 +74,119 @@ function hasExistingOutput(year, type, id, event) {
 // ---- Scraper ----
 async function getWpra(event, type, year, circuit) {
   const currentYear = new Date().getFullYear();
+  const modernCircuitSlug = decodeURIComponent(circuit || "")
+    .toLowerCase()
+    .replace(/\s+/g, "-");
 
-  function url() {
-    if (event === EVENTS.GB && type === TYPE.WORLD && year === currentYear)
-      return `https://wpra.com/pro-rodeo-world-standings-${currentYear}/`;
+  function urls() {
+    if (event === EVENTS.GB && type === TYPE.WORLD && year === currentYear) {
+      return [
+        `https://wpra.com/pro-rodeo-world-standings-${currentYear}/`,
+        `https://wpra.com/pro-rodeo-world-standings-${currentYear - 1}/`,
+      ];
+    }
 
-    if (event === EVENTS.GB && type === TYPE.ROOKIE && year === currentYear)
-      return `https://wpra.com/wpra-resistol-rookie-barrels-${currentYear}/`;
+    if (event === EVENTS.GB && type === TYPE.ROOKIE && year === currentYear) {
+      return [
+        `https://wpra.com/wpra-resistol-rookie-barrels-${currentYear}/`,
+        `https://wpra.com/wpra-resistol-rookie-${currentYear}/`,
+        `https://wpra.com/wpra-resistol-rookie-barrels-${currentYear - 1}/`,
+        `https://wpra.com/wpra-resistol-rookie-${currentYear - 1}/`,
+      ];
+    }
 
-    if (event === EVENTS.LB && type === TYPE.WORLD && year === currentYear)
-      return `https://wpra.com/pro-rodeo-breakaway-world-standings-${currentYear}/`;
+    if (event === EVENTS.LB && type === TYPE.WORLD && year === currentYear) {
+      return [
+        `https://wpra.com/pro-rodeo-breakaway-world-standings-${currentYear}/`,
+        `https://wpra.com/pro-rodeo-breakaway-world-standings-${currentYear - 1}/`,
+      ];
+    }
 
-    if (event === EVENTS.LB && type === TYPE.ROOKIE && year === currentYear)
-      return `https://wpra.com/wpra-resistol-rookie-breakaway-${currentYear}/`;
+    if (event === EVENTS.LB && type === TYPE.ROOKIE && year === currentYear) {
+      return [
+        `https://wpra.com/wpra-resistol-rookie-breakaway-${currentYear}/`,
+        `https://wpra.com/wpra-resistol-rookie-breakaway-${currentYear - 1}/`,
+      ];
+    }
 
-    if (event === EVENTS.GB && type === TYPE.CIRCUIT && year === currentYear)
-      return `https://wpra.com/pro-rodeo-circuit-standings-${circuit.toLowerCase()}-${currentYear}/`;
+    if (event === EVENTS.GB && type === TYPE.CIRCUIT && year === currentYear) {
+      return [
+        `https://wpra.com/pro-rodeo-circuit-standings-${modernCircuitSlug}-${currentYear}/`,
+        `https://wpra.com/pro-rodeo-circuit-standings-${modernCircuitSlug}-${currentYear - 1}/`,
+      ];
+    }
 
-    if (event === EVENTS.LB && type === TYPE.CIRCUIT && year === currentYear)
-      return `https://wpra.com/pro-rodeo-breakaway-circuit-standings-${circuit.toLowerCase()}-${currentYear}/`;
+    if (event === EVENTS.LB && type === TYPE.CIRCUIT && year === currentYear) {
+      return [
+        `https://wpra.com/pro-rodeo-breakaway-circuit-standings-${modernCircuitSlug}-${currentYear}/`,
+        `https://wpra.com/pro-rodeo-breakaway-circuit-standings-${modernCircuitSlug}-${currentYear - 1}/`,
+      ];
+    }
 
     if (event === EVENTS.GB && type === TYPE.WORLD)
-      return `https://archived.wpra.com/index.php/standings-group-season?group=Pro%20Rodeo%20-%20World&season=${year}&standing=${year}%20Pro%20Rodeo%20World%20Standings`;
+      return [
+        `https://archived.wpra.com/index.php/standings-group-season?group=Pro%20Rodeo%20-%20World&season=${year}&standing=${year}%20Pro%20Rodeo%20World%20Standings`,
+      ];
 
     if (event === EVENTS.GB && type === TYPE.ROOKIE)
-      return `https://archived.wpra.com/index.php/standings-group-season?group=Rookie%20Standings&season=${year}&standing=${year}%20Rookie%20Standings`;
+      return [
+        `https://archived.wpra.com/index.php/standings-group-season?group=Rookie%20Standings&season=${year}&standing=${year}%20Rookie%20Standings`,
+      ];
 
     if (event === EVENTS.GB && type === TYPE.CIRCUIT)
-      return `https://archived.wpra.com/index.php/standings-group-season?group=Pro%20Rodeo-Circuit&season=${year}&standing=${year}%20Pro%20Rodeo%20${circuit}%20Circuit%20Standings`;
+      return [
+        `https://archived.wpra.com/index.php/standings-group-season?group=Pro%20Rodeo-Circuit&season=${year}&standing=${year}%20Pro%20Rodeo%20${circuit}%20Circuit%20Standings`,
+      ];
 
     if (event === EVENTS.LB && type === TYPE.WORLD)
-      return `https://archived.wpra.com/index.php/standings-group-season?group=Roping%20Standings&season=${year}&standing=${year}%20Pro%20Rodeo%20Breakaway%20World%20Standings`;
+      return [
+        `https://archived.wpra.com/index.php/standings-group-season?group=Roping%20Standings&season=${year}&standing=${year}%20Pro%20Rodeo%20Breakaway%20World%20Standings`,
+      ];
 
     if (event === EVENTS.LB && type === TYPE.CIRCUIT)
-      return `https://archived.wpra.com/index.php/standings-group-season?group=Roping%20Standings&season=${year}&standing=${year}%20Pro%20Rodeo%20Breakaway%20${circuit}%20Circuit%20Standings`;
+      return [
+        `https://archived.wpra.com/index.php/standings-group-season?group=Roping%20Standings&season=${year}&standing=${year}%20Pro%20Rodeo%20Breakaway%20${circuit}%20Circuit%20Standings`,
+      ];
 
-    return null;
+    return [];
   }
 
-  const targetUrl = url();
-  if (!targetUrl) return { error: "Invalid params", data: [] };
+  const targetUrls = urls();
+  if (!targetUrls.length) return { error: "Invalid params", data: [] };
 
-  let response;
-  try {
-    response = await axios.get(targetUrl, {
-      timeout: 15000,
-      validateStatus: (status) => status < 500,
-    });
-  } catch (err) {
-    const message = err?.message || "Request failed";
-    console.warn(`Request error for ${targetUrl}: ${message}`);
-    return { error: message, data: [] };
+  let response = null;
+  let lastError = null;
+
+  for (const targetUrl of targetUrls) {
+    try {
+      const candidate = await axios.get(targetUrl, {
+        timeout: 15000,
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "Accept-Language": "en-US,en;q=0.9",
+        },
+        validateStatus: (status) => status < 500,
+      });
+
+      if (candidate.status >= 400) {
+        lastError = `HTTP ${candidate.status} for ${targetUrl}`;
+        console.warn(lastError);
+        continue;
+      }
+
+      response = candidate;
+      break;
+    } catch (err) {
+      const message = err?.message || "Request failed";
+      lastError = `Request error for ${targetUrl}: ${message}`;
+      console.warn(lastError);
+    }
   }
 
-  if (response.status >= 400) {
-    const message = `HTTP ${response.status} for ${targetUrl}`;
-    console.warn(message);
-    return { error: message, data: [] };
+  if (!response) {
+    return { error: lastError || "All URL attempts failed", data: [] };
   }
 
   const $ = cheerio.load(response.data);
