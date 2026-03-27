@@ -4,6 +4,12 @@ on:
   schedule:
     - cron: "0 12 * * 1"
   workflow_dispatch:
+    inputs:
+      refresh_years:
+        description: "Comma-separated years to force refresh (example: 2025)"
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -41,6 +47,7 @@ jobs:
       - name: Run scraper
         env:
           WPRA_OUTPUT_DIR: ${{ github.workspace }}/wpra-json
+          WPRA_REFRESH_YEARS: ${{ github.event.inputs.refresh_years || '' }}
         run: node wpra_scraper.cjs
 
       - name: Commit and push data changes

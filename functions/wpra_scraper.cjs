@@ -98,6 +98,39 @@ async function getWpra(event, type, year, circuit) {
   const circuitSvcModifier = CIRCUIT_SVC_MODIFIERS[circuitName];
 
   function urls() {
+    if (year === 2025) {
+      if (event === EVENTS.GB && type === TYPE.WORLD) {
+        return ["https://wpra.com/pro-rodeo-world-standings-2025/"];
+      }
+
+      if (event === EVENTS.GB && type === TYPE.ROOKIE) {
+        return [
+          "https://wpra.com/wpra-resistol-rookie-barrels-2025/",
+          "https://wpra.com/wpra-resistol-rookie-2025/",
+        ];
+      }
+
+      if (event === EVENTS.LB && type === TYPE.WORLD) {
+        return ["https://wpra.com/pro-rodeo-breakaway-world-standings-2025/"];
+      }
+
+      if (event === EVENTS.LB && type === TYPE.ROOKIE) {
+        return ["https://wpra.com/wpra-resistol-rookie-breakaway-2025/"];
+      }
+
+      if (event === EVENTS.GB && type === TYPE.CIRCUIT) {
+        return [
+          `https://wpra.com/pro-rodeo-circuit-standings-${modernCircuitSlug}-2025/`,
+        ];
+      }
+
+      if (event === EVENTS.LB && type === TYPE.CIRCUIT) {
+        return [
+          `https://wpra.com/pro-rodeo-breakaway-circuit-standings-${modernCircuitSlug}-2025/`,
+        ];
+      }
+    }
+
     if (event === EVENTS.GB && type === TYPE.WORLD && year === currentYear) {
       return [
         "https://wpra.com/pro-rodeo-world-standings/?svcUrl=pro-gb-world",
@@ -276,6 +309,12 @@ async function runAll() {
   const currentYear = new Date().getFullYear();
   const startYearDefault = 2014;
   const lbStartYear = 2020;
+  const forcedRefreshYears = new Set(
+    (process.env.WPRA_REFRESH_YEARS || "")
+      .split(",")
+      .map((value) => Number.parseInt(value.trim(), 10))
+      .filter(Number.isFinite),
+  );
   const circuits = Object.values(CIRCUITS);
   const events = Object.values(EVENTS);
   const types = Object.values(TYPE);
@@ -310,6 +349,7 @@ async function runAll() {
 
             if (
               year !== currentYear &&
+              !forcedRefreshYears.has(year) &&
               hasExistingOutput(year, type, circuit.id, event)
             ) {
               completed++;
@@ -339,7 +379,11 @@ async function runAll() {
             `standings-year=${year}&type=${type}&id=&event=${event}.json`,
           );
 
-          if (year !== currentYear && hasExistingOutput(year, type, "", event)) {
+          if (
+            year !== currentYear &&
+            !forcedRefreshYears.has(year) &&
+            hasExistingOutput(year, type, "", event)
+          ) {
             completed++;
             progressBar(completed, totalTasks);
             continue;
