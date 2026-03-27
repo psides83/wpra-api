@@ -105,8 +105,8 @@ async function getWpra(event, type, year, circuit) {
 
       if (event === EVENTS.GB && type === TYPE.ROOKIE) {
         return [
-          "https://wpra.com/wpra-resistol-rookie-barrels-2025/",
           "https://wpra.com/wpra-resistol-rookie-2025/",
+          "https://wpra.com/wpra-resistol-rookie-barrels-2025/",
         ];
       }
 
