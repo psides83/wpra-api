@@ -256,23 +256,36 @@ async function fetchWpraAthleteLookup() {
 
   if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) return emptyLookup;
 
-  const endpoint = `${SUPABASE_URL}/rest/v1/wpra_athletes?select=contestant_id,first_name,last_name,hometown,photo_url`;
-  const response = await fetch(endpoint, {
-    headers: {
-      apikey: SUPABASE_SERVICE_ROLE_KEY,
-      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-      Accept: "application/json",
-    },
-  });
+  const pageSize = 1000;
+  const athletes = [];
 
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(
-      `Supabase athlete lookup failed (${response.status}): ${body}`,
-    );
+  for (let offset = 0; ; offset += pageSize) {
+    const from = offset;
+    const to = offset + pageSize - 1;
+    const endpoint = `${SUPABASE_URL}/rest/v1/wpra_athletes?select=contestant_id,first_name,last_name,hometown,photo_url&order=contestant_id.asc`;
+
+    const response = await fetch(endpoint, {
+      headers: {
+        apikey: SUPABASE_SERVICE_ROLE_KEY,
+        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        Accept: "application/json",
+        Range: `${from}-${to}`,
+      },
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(
+        `Supabase athlete lookup failed (${response.status}): ${body}`,
+      );
+    }
+
+    const page = await response.json();
+    athletes.push(...page);
+
+    if (page.length < pageSize) break;
   }
 
-  const athletes = await response.json();
   const byFullKey = new Map();
   const byNameKey = new Map();
 
