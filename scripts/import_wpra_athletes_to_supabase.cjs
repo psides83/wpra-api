@@ -61,12 +61,18 @@ function extractContestantsFromResults(payload) {
           for (const c of contestants) {
             if (!Number.isFinite(c?.ContestantId)) continue;
 
+            const firstName = c.FirstName || "";
+            const lastName = c.LastName || "";
+            const name = `${firstName} ${lastName}`.trim() || null;
+
             athletes.push({
               contestant_id: c.ContestantId,
-              first_name: c.FirstName || null,
-              last_name: c.LastName || null,
+              name,
+              first_name: firstName || null,
+              last_name: lastName || null,
               nick_name: c.NickName || null,
               hometown: c.Hometown || null,
+              photo_url: c.PhotoUrl || null,
             });
           }
         }
@@ -90,10 +96,12 @@ function dedupeAthletes(rows) {
 function writeAthletesCsv(rows, filePath) {
   const headers = [
     "contestant_id",
+    "name",
     "first_name",
     "last_name",
     "nick_name",
     "hometown",
+    "photo_url",
   ];
 
   const lines = [

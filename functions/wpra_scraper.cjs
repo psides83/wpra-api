@@ -74,6 +74,34 @@ function makeAthleteFullKey(firstName, lastName, hometown) {
   ].join("|");
 }
 
+function getEventIdPart(event) {
+  if (event === EVENTS.GB) return "1";
+  if (event === EVENTS.LB) return "2";
+  return "";
+}
+
+function getTypeIdPart(type) {
+  if (type === TYPE.WORLD) return "1";
+  if (type === TYPE.ROOKIE) return "2";
+  if (type === TYPE.CIRCUIT) return "3";
+  return "";
+}
+
+function makeStandingsId(row) {
+  const parts = [
+    getEventIdPart(row.event),
+    getTypeIdPart(row.type),
+    Number.isFinite(row.circuit_id) && row.circuit_id > 0
+      ? String(row.circuit_id)
+      : "",
+    Number.isFinite(row.season_year) ? String(row.season_year) : "",
+    Number.isFinite(row.place) && row.place > 0 ? String(row.place) : "",
+  ];
+
+  const id = Number.parseInt(parts.join(""), 10);
+  return Number.isFinite(id) ? id : null;
+}
+
 function progressBar(current, total) {
   const percent = Math.floor((current / total) * 100);
   const filled = "█".repeat(Math.floor(percent / 4));
@@ -191,6 +219,7 @@ function buildSupabaseRows(filename, payload) {
       Number.isFinite(row.ContestantId) && row.ContestantId > 0
         ? row.ContestantId
         : null,
+    photo_url: row.PhotoURL ?? null,
     place: row.Place ?? null,
     first_name: row.FirstName ?? null,
     last_name: row.LastName ?? null,
@@ -227,7 +256,7 @@ async function fetchWpraAthleteLookup() {
 
   if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) return emptyLookup;
 
-  const endpoint = `${SUPABASE_URL}/rest/v1/wpra_athletes?select=contestant_id,first_name,last_name,hometown`;
+  const endpoint = `${SUPABASE_URL}/rest/v1/wpra_athletes?select=contestant_id,first_name,last_name,hometown,photo_url`;
   const response = await fetch(endpoint, {
     headers: {
       apikey: SUPABASE_SERVICE_ROLE_KEY,
@@ -257,17 +286,22 @@ async function fetchWpraAthleteLookup() {
     );
     const nameKey = makeAthleteNameKey(athlete.first_name, athlete.last_name);
 
-    byFullKey.set(fullKey, athlete.contestant_id);
+    byFullKey.set(fullKey, {
+      contestant_id: athlete.contestant_id,
+      photo_url: athlete.photo_url || null,
+    });
 
     const existingNameMatch = byNameKey.get(nameKey);
     if (!existingNameMatch) {
       byNameKey.set(nameKey, {
         contestant_id: athlete.contestant_id,
+        photo_url: athlete.photo_url || null,
         ambiguous: false,
       });
     } else if (existingNameMatch.contestant_id !== athlete.contestant_id) {
       byNameKey.set(nameKey, {
         contestant_id: null,
+        photo_url: null,
         ambiguous: true,
       });
     }
@@ -283,7 +317,7 @@ async function fetchWpraAthleteLookup() {
   };
 }
 
-function findContestantIdForStanding(row, athleteLookup) {
+function findAthleteForStanding(row, athleteLookup) {
   if (!athleteLookup) return null;
 
   const fullKey = makeAthleteFullKey(
@@ -292,7 +326,7 @@ function findContestantIdForStanding(row, athleteLookup) {
     row.hometown,
   );
   const fullMatch = athleteLookup.byFullKey.get(fullKey);
-  if (Number.isFinite(fullMatch)) return fullMatch;
+  if (fullMatch && Number.isFinite(fullMatch.contestant_id)) return fullMatch;
 
   const nameKey = makeAthleteNameKey(row.first_name, row.last_name);
   const nameMatch = athleteLookup.byNameKey.get(nameKey);
@@ -301,7 +335,7 @@ function findContestantIdForStanding(row, athleteLookup) {
     !nameMatch.ambiguous &&
     Number.isFinite(nameMatch.contestant_id)
   ) {
-    return nameMatch.contestant_id;
+    return nameMatch;
   }
 
   return null;
@@ -312,13 +346,22 @@ function enrichRowsWithContestantIds(rows, athleteLookup) {
   let unmatched = 0;
 
   const enriched = rows.map((row) => {
-    const contestantId = findContestantIdForStanding(row, athleteLookup);
-    if (Number.isFinite(contestantId)) matched++;
+    const athlete = findAthleteForStanding(row, athleteLookup);
+    if (athlete && Number.isFinite(athlete.contestant_id)) matched++;
     else unmatched++;
 
-    return {
+    const enrichedRow = {
       ...row,
-      contestant_id: Number.isFinite(contestantId) ? contestantId : null,
+      contestant_id:
+        athlete && Number.isFinite(athlete.contestant_id)
+          ? athlete.contestant_id
+          : null,
+      photo_url: athlete?.photo_url || row.photo_url || null,
+    };
+
+    return {
+      ...enrichedRow,
+      id: makeStandingsId(enrichedRow),
     };
   });
 
@@ -379,14 +422,20 @@ async function upsertSupabaseRows(filename, payload, athleteLookup) {
       ),
     });
 
-  let response = await makeRequest(
-    "season_year,event,type,circuit_id_key,contestant_key",
-  );
+  let response = await makeRequest("id");
 
   if (response.status === 400) {
     const body = await response.text();
-    if (body.includes('"contestant_key" does not exist')) {
-      // Backward compatibility: allow runs before migration is applied.
+    if (
+      body.includes('"id"') ||
+      body.includes("there is no unique or exclusion constraint")
+    ) {
+      // Backward compatibility: allow runs before the id-based upsert migration is applied.
+      response = await makeRequest(
+        "season_year,event,type,circuit_id_key,contestant_key",
+      );
+    } else if (body.includes('"contestant_key" does not exist')) {
+      // Backward compatibility: allow runs before the contestant_key migration is applied.
       response = await makeRequest(
         "season_year,event,type,circuit_id_key,place",
       );
