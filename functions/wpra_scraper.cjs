@@ -40,8 +40,7 @@ const CIRCUIT_SVC_MODIFIERS = {
 };
 
 const outputDir =
-  process.env.WPRA_OUTPUT_DIR ||
-  path.resolve(__dirname, "data");
+  process.env.WPRA_OUTPUT_DIR || path.resolve(__dirname, "data");
 
 if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
 
@@ -52,6 +51,27 @@ const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 // ---- Helpers ----
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function normalizeLookupValue(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+function makeAthleteNameKey(firstName, lastName) {
+  return [normalizeLookupValue(firstName), normalizeLookupValue(lastName)].join(
+    "|",
+  );
+}
+
+function makeAthleteFullKey(firstName, lastName, hometown) {
+  return [
+    normalizeLookupValue(firstName),
+    normalizeLookupValue(lastName),
+    normalizeLookupValue(hometown),
+  ].join("|");
 }
 
 function progressBar(current, total) {
@@ -102,7 +122,8 @@ function parseFileMetadata(filename) {
   if (!type || !Number.isFinite(year) || !event || circuitIdRaw === null) {
     return null;
   }
-  const circuitId = circuitIdRaw === "" ? null : Number.parseInt(circuitIdRaw, 10);
+  const circuitId =
+    circuitIdRaw === "" ? null : Number.parseInt(circuitIdRaw, 10);
   return {
     type,
     year,
@@ -166,6 +187,10 @@ function buildSupabaseRows(filename, payload) {
     event: meta.event,
     type: meta.type,
     circuit_id: meta.circuitId,
+    contestant_id:
+      Number.isFinite(row.ContestantId) && row.ContestantId > 0
+        ? row.ContestantId
+        : null,
     place: row.Place ?? null,
     first_name: row.FirstName ?? null,
     last_name: row.LastName ?? null,
@@ -179,7 +204,9 @@ function buildSupabaseRows(filename, payload) {
 function dedupeSupabaseRows(rows) {
   const byKey = new Map();
   for (const row of rows) {
-    const contestantKey = `${(row.first_name || "").trim().toLowerCase()}|${(row.last_name || "").trim().toLowerCase()}|${(row.hometown || "").trim().toLowerCase()}`;
+    const contestantKey = row.contestant_id
+      ? `id:${row.contestant_id}`
+      : `${(row.first_name || "").trim().toLowerCase()}|${(row.last_name || "").trim().toLowerCase()}|${(row.hometown || "").trim().toLowerCase()}`;
     const key = [
       row.season_year,
       row.event,
@@ -192,44 +219,165 @@ function dedupeSupabaseRows(rows) {
   return [...byKey.values()];
 }
 
-async function upsertSupabaseRows(filename, payload) {
+async function fetchWpraAthleteLookup() {
+  const emptyLookup = {
+    byFullKey: new Map(),
+    byNameKey: new Map(),
+  };
+
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) return emptyLookup;
+
+  const endpoint = `${SUPABASE_URL}/rest/v1/wpra_athletes?select=contestant_id,first_name,last_name,hometown`;
+  const response = await fetch(endpoint, {
+    headers: {
+      apikey: SUPABASE_SERVICE_ROLE_KEY,
+      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      Accept: "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(
+      `Supabase athlete lookup failed (${response.status}): ${body}`,
+    );
+  }
+
+  const athletes = await response.json();
+  const byFullKey = new Map();
+  const byNameKey = new Map();
+
+  for (const athlete of athletes) {
+    if (!Number.isFinite(athlete.contestant_id)) continue;
+
+    const fullKey = makeAthleteFullKey(
+      athlete.first_name,
+      athlete.last_name,
+      athlete.hometown,
+    );
+    const nameKey = makeAthleteNameKey(athlete.first_name, athlete.last_name);
+
+    byFullKey.set(fullKey, athlete.contestant_id);
+
+    const existingNameMatch = byNameKey.get(nameKey);
+    if (!existingNameMatch) {
+      byNameKey.set(nameKey, {
+        contestant_id: athlete.contestant_id,
+        ambiguous: false,
+      });
+    } else if (existingNameMatch.contestant_id !== athlete.contestant_id) {
+      byNameKey.set(nameKey, {
+        contestant_id: null,
+        ambiguous: true,
+      });
+    }
+  }
+
+  console.log(
+    `\n👤 Loaded ${athletes.length} WPRA athlete records for contestant_id matching.`,
+  );
+
+  return {
+    byFullKey,
+    byNameKey,
+  };
+}
+
+function findContestantIdForStanding(row, athleteLookup) {
+  if (!athleteLookup) return null;
+
+  const fullKey = makeAthleteFullKey(
+    row.first_name,
+    row.last_name,
+    row.hometown,
+  );
+  const fullMatch = athleteLookup.byFullKey.get(fullKey);
+  if (Number.isFinite(fullMatch)) return fullMatch;
+
+  const nameKey = makeAthleteNameKey(row.first_name, row.last_name);
+  const nameMatch = athleteLookup.byNameKey.get(nameKey);
+  if (
+    nameMatch &&
+    !nameMatch.ambiguous &&
+    Number.isFinite(nameMatch.contestant_id)
+  ) {
+    return nameMatch.contestant_id;
+  }
+
+  return null;
+}
+
+function enrichRowsWithContestantIds(rows, athleteLookup) {
+  let matched = 0;
+  let unmatched = 0;
+
+  const enriched = rows.map((row) => {
+    const contestantId = findContestantIdForStanding(row, athleteLookup);
+    if (Number.isFinite(contestantId)) matched++;
+    else unmatched++;
+
+    return {
+      ...row,
+      contestant_id: Number.isFinite(contestantId) ? contestantId : null,
+    };
+  });
+
+  if (rows.length) {
+    console.log(
+      `\n🔗 Contestant ID matches: ${matched}/${rows.length}; unmatched or ambiguous: ${unmatched}`,
+    );
+  }
+
+  return enriched;
+}
+
+async function upsertSupabaseRows(filename, payload, athleteLookup) {
   if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) return;
 
   const rows = dedupeSupabaseRows(
-    buildSupabaseRows(filename, payload).filter(
-      (row) => Number.isFinite(row.place) && row.place > 0,
+    enrichRowsWithContestantIds(
+      buildSupabaseRows(filename, payload).filter(
+        (row) => Number.isFinite(row.place) && row.place > 0,
+      ),
+      athleteLookup,
     ),
   );
   if (!rows.length) return;
 
-  const placeFallbackRows = buildSupabaseRows(filename, payload).filter(
-    (row) => Number.isFinite(row.place) && row.place > 0,
+  const placeFallbackRows = enrichRowsWithContestantIds(
+    buildSupabaseRows(filename, payload).filter(
+      (row) => Number.isFinite(row.place) && row.place > 0,
+    ),
+    athleteLookup,
   );
-  const dedupedPlaceFallbackRows = [...new Map(
-    placeFallbackRows.map((row) => [
-      [row.season_year, row.event, row.type, row.circuit_id ?? -1, row.place].join("|"),
-      row,
-    ]),
-  ).values()];
+  const dedupedPlaceFallbackRows = [
+    ...new Map(
+      placeFallbackRows.map((row) => [
+        [
+          row.season_year,
+          row.event,
+          row.type,
+          row.circuit_id ?? -1,
+          row.place,
+        ].join("|"),
+        row,
+      ]),
+    ).values(),
+  ];
 
   const makeRequest = async (onConflict) =>
-    fetch(
-      `${SUPABASE_URL}/rest/v1/standings?on_conflict=${onConflict}`,
-      {
-        method: "POST",
-        headers: {
-          apikey: SUPABASE_SERVICE_ROLE_KEY,
-          Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-          "Content-Type": "application/json",
-          Prefer: "resolution=merge-duplicates,return=minimal",
-        },
-        body: JSON.stringify(
-          onConflict.includes("contestant_key")
-            ? rows
-            : dedupedPlaceFallbackRows,
-        ),
+    fetch(`${SUPABASE_URL}/rest/v1/standings?on_conflict=${onConflict}`, {
+      method: "POST",
+      headers: {
+        apikey: SUPABASE_SERVICE_ROLE_KEY,
+        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        "Content-Type": "application/json",
+        Prefer: "resolution=merge-duplicates,return=minimal",
       },
-    );
+      body: JSON.stringify(
+        onConflict.includes("contestant_key") ? rows : dedupedPlaceFallbackRows,
+      ),
+    });
 
   let response = await makeRequest(
     "season_year,event,type,circuit_id_key,contestant_key",
@@ -237,9 +385,11 @@ async function upsertSupabaseRows(filename, payload) {
 
   if (response.status === 400) {
     const body = await response.text();
-    if (body.includes("\"contestant_key\" does not exist")) {
+    if (body.includes('"contestant_key" does not exist')) {
       // Backward compatibility: allow runs before migration is applied.
-      response = await makeRequest("season_year,event,type,circuit_id_key,place");
+      response = await makeRequest(
+        "season_year,event,type,circuit_id_key,place",
+      );
     } else {
       throw new Error(`Supabase upsert failed (${response.status}): ${body}`);
     }
@@ -257,9 +407,7 @@ async function getWpra(event, type, year, circuit) {
   const circuitName = decodeURIComponent(circuit || "")
     .toLowerCase()
     .trim();
-  const modernCircuitSlug = circuitName
-    .toLowerCase()
-    .replace(/\s+/g, "-");
+  const modernCircuitSlug = circuitName.toLowerCase().replace(/\s+/g, "-");
   const circuitSvcModifier = CIRCUIT_SVC_MODIFIERS[circuitName];
 
   function urls() {
@@ -392,7 +540,8 @@ async function getWpra(event, type, year, circuit) {
         headers: {
           "User-Agent":
             "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          Accept:
+            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
           "Accept-Language": "en-US,en;q=0.9",
         },
         validateStatus: (status) => status < 500,
@@ -483,6 +632,7 @@ async function runAll() {
   const circuits = Object.values(CIRCUITS);
   const events = Object.values(EVENTS);
   const types = Object.values(TYPE);
+  const athleteLookup = await fetchWpraAthleteLookup();
 
   // Compute total tasks
   let totalTasks = 0;
@@ -528,8 +678,11 @@ async function runAll() {
               year,
               circuit.title,
             );
-            const normalized = writeNormalizedPayload(filename, { error, data });
-            await upsertSupabaseRows(filename, normalized);
+            const normalized = writeNormalizedPayload(filename, {
+              error,
+              data,
+            });
+            await upsertSupabaseRows(filename, normalized, athleteLookup);
             completed++;
             progressBar(completed, totalTasks);
             await delay(DELAY_MS);
@@ -554,7 +707,7 @@ async function runAll() {
 
           const { error, data } = await getWpra(event, type, year);
           const normalized = writeNormalizedPayload(filename, { error, data });
-          await upsertSupabaseRows(filename, normalized);
+          await upsertSupabaseRows(filename, normalized, athleteLookup);
           completed++;
           progressBar(completed, totalTasks);
           await delay(DELAY_MS);
