@@ -86,6 +86,74 @@ function hasExistingOutput(year, type, id, event) {
   return fs.existsSync(modernName) || fs.existsSync(legacyName);
 }
 
+function parseFileMetadata(filename) {
+  const base = path.basename(filename);
+  if (!base.endsWith(".json")) return null;
+  const paramsString = base
+    .replace(/^standings[-?]/, "")
+    .replace(/\.json$/, "");
+  const params = new URLSearchParams(paramsString);
+  const type = params.get("type");
+  const year = Number.parseInt(params.get("year") || "", 10);
+  const circuitIdRaw = params.get("id");
+  const event = params.get("event");
+  if (!type || !Number.isFinite(year) || !event || circuitIdRaw === null) {
+    return null;
+  }
+  const circuitId = circuitIdRaw === "" ? null : Number.parseInt(circuitIdRaw, 10);
+  return {
+    type,
+    year,
+    event,
+    circuitId: Number.isFinite(circuitId) ? circuitId : null,
+  };
+}
+
+function normalizePayloadForFile(filename, payload) {
+  const meta = parseFileMetadata(filename);
+  if (!meta || !payload || !Array.isArray(payload.data)) return payload;
+
+  const normalizedData = payload.data.map((row) => ({
+    ...row,
+    Type: meta.type,
+    Event: meta.event,
+    SeasonYear: meta.year,
+    ...(meta.circuitId !== null ? { CircuitId: meta.circuitId } : {}),
+  }));
+
+  return {
+    ...payload,
+    data: normalizedData,
+  };
+}
+
+function writeNormalizedPayload(filename, payload) {
+  const normalized = normalizePayloadForFile(filename, payload);
+  fs.writeFileSync(filename, JSON.stringify(normalized, null, 2));
+}
+
+function normalizeExistingOutputFiles() {
+  const files = fs
+    .readdirSync(outputDir)
+    .filter((name) => name.startsWith("standings") && name.endsWith(".json"));
+  let normalizedCount = 0;
+
+  for (const file of files) {
+    const filename = path.join(outputDir, file);
+    let payload;
+    try {
+      payload = JSON.parse(fs.readFileSync(filename, "utf-8"));
+    } catch {
+      continue;
+    }
+    const normalized = normalizePayloadForFile(filename, payload);
+    fs.writeFileSync(filename, JSON.stringify(normalized, null, 2));
+    normalizedCount++;
+  }
+
+  console.log(`\n🧹 Normalized ${normalizedCount} existing output files.`);
+}
+
 // ---- Scraper ----
 async function getWpra(event, type, year, circuit) {
   const currentYear = new Date().getFullYear();
@@ -363,10 +431,7 @@ async function runAll() {
               year,
               circuit.title,
             );
-            fs.writeFileSync(
-              filename,
-              JSON.stringify({ error, data }, null, 2),
-            );
+            writeNormalizedPayload(filename, { error, data });
             completed++;
             progressBar(completed, totalTasks);
             await delay(DELAY_MS);
@@ -390,7 +455,7 @@ async function runAll() {
           }
 
           const { error, data } = await getWpra(event, type, year);
-          fs.writeFileSync(filename, JSON.stringify({ error, data }, null, 2));
+          writeNormalizedPayload(filename, { error, data });
           completed++;
           progressBar(completed, totalTasks);
           await delay(DELAY_MS);
@@ -400,6 +465,7 @@ async function runAll() {
   }
 
   process.stdout.write("\n🏁 All scraping complete!\n");
+  normalizeExistingOutputFiles();
   writeTimestampHTML();
 }
 
