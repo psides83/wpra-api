@@ -46,6 +46,8 @@ const outputDir =
 if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
 
 const DELAY_MS = 3000;
+const SUPABASE_URL = process.env.SUPABASE_URL || "";
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 
 // ---- Helpers ----
 function delay(ms) {
@@ -130,6 +132,7 @@ function normalizePayloadForFile(filename, payload) {
 function writeNormalizedPayload(filename, payload) {
   const normalized = normalizePayloadForFile(filename, payload);
   fs.writeFileSync(filename, JSON.stringify(normalized, null, 2));
+  return normalized;
 }
 
 function normalizeExistingOutputFiles() {
@@ -152,6 +155,53 @@ function normalizeExistingOutputFiles() {
   }
 
   console.log(`\n🧹 Normalized ${normalizedCount} existing output files.`);
+}
+
+function buildSupabaseRows(filename, payload) {
+  const meta = parseFileMetadata(filename);
+  if (!meta || !payload || !Array.isArray(payload.data)) return [];
+
+  return payload.data.map((row) => ({
+    season_year: meta.year,
+    event: meta.event,
+    type: meta.type,
+    circuit_id: meta.circuitId,
+    place: row.Place ?? null,
+    first_name: row.FirstName ?? null,
+    last_name: row.LastName ?? null,
+    hometown: row.Hometown ?? null,
+    earnings: row.Earnings ?? null,
+    points: row.Points ?? null,
+    updated_at: new Date().toISOString(),
+  }));
+}
+
+async function upsertSupabaseRows(filename, payload) {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) return;
+
+  const rows = buildSupabaseRows(filename, payload).filter(
+    (row) => Number.isFinite(row.place) && row.place > 0,
+  );
+  if (!rows.length) return;
+
+  const endpoint =
+    `${SUPABASE_URL}/rest/v1/standings` +
+    "?on_conflict=season_year,event,type,circuit_id_key,place";
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      apikey: SUPABASE_SERVICE_ROLE_KEY,
+      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      "Content-Type": "application/json",
+      Prefer: "resolution=merge-duplicates,return=minimal",
+    },
+    body: JSON.stringify(rows),
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Supabase upsert failed (${response.status}): ${body}`);
+  }
 }
 
 // ---- Scraper ----
@@ -431,7 +481,8 @@ async function runAll() {
               year,
               circuit.title,
             );
-            writeNormalizedPayload(filename, { error, data });
+            const normalized = writeNormalizedPayload(filename, { error, data });
+            await upsertSupabaseRows(filename, normalized);
             completed++;
             progressBar(completed, totalTasks);
             await delay(DELAY_MS);
@@ -455,7 +506,8 @@ async function runAll() {
           }
 
           const { error, data } = await getWpra(event, type, year);
-          writeNormalizedPayload(filename, { error, data });
+          const normalized = writeNormalizedPayload(filename, { error, data });
+          await upsertSupabaseRows(filename, normalized);
           completed++;
           progressBar(completed, totalTasks);
           await delay(DELAY_MS);
