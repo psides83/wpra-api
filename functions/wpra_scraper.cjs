@@ -186,7 +186,7 @@ async function upsertSupabaseRows(filename, payload) {
 
   const endpoint =
     `${SUPABASE_URL}/rest/v1/standings` +
-    "?on_conflict=season_year,event,type,circuit_id_key,place";
+    "?on_conflict=season_year,event,type,circuit_id_key,contestant_key";
   const response = await fetch(endpoint, {
     method: "POST",
     headers: {
