@@ -176,27 +176,74 @@ function buildSupabaseRows(filename, payload) {
   }));
 }
 
+function dedupeSupabaseRows(rows) {
+  const byKey = new Map();
+  for (const row of rows) {
+    const contestantKey = `${(row.first_name || "").trim().toLowerCase()}|${(row.last_name || "").trim().toLowerCase()}|${(row.hometown || "").trim().toLowerCase()}`;
+    const key = [
+      row.season_year,
+      row.event,
+      row.type,
+      row.circuit_id ?? -1,
+      contestantKey,
+    ].join("|");
+    byKey.set(key, row);
+  }
+  return [...byKey.values()];
+}
+
 async function upsertSupabaseRows(filename, payload) {
   if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) return;
 
-  const rows = buildSupabaseRows(filename, payload).filter(
-    (row) => Number.isFinite(row.place) && row.place > 0,
+  const rows = dedupeSupabaseRows(
+    buildSupabaseRows(filename, payload).filter(
+      (row) => Number.isFinite(row.place) && row.place > 0,
+    ),
   );
   if (!rows.length) return;
 
-  const endpoint =
-    `${SUPABASE_URL}/rest/v1/standings` +
-    "?on_conflict=season_year,event,type,circuit_id_key,contestant_key";
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      apikey: SUPABASE_SERVICE_ROLE_KEY,
-      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-      "Content-Type": "application/json",
-      Prefer: "resolution=merge-duplicates,return=minimal",
-    },
-    body: JSON.stringify(rows),
-  });
+  const placeFallbackRows = buildSupabaseRows(filename, payload).filter(
+    (row) => Number.isFinite(row.place) && row.place > 0,
+  );
+  const dedupedPlaceFallbackRows = [...new Map(
+    placeFallbackRows.map((row) => [
+      [row.season_year, row.event, row.type, row.circuit_id ?? -1, row.place].join("|"),
+      row,
+    ]),
+  ).values()];
+
+  const makeRequest = async (onConflict) =>
+    fetch(
+      `${SUPABASE_URL}/rest/v1/standings?on_conflict=${onConflict}`,
+      {
+        method: "POST",
+        headers: {
+          apikey: SUPABASE_SERVICE_ROLE_KEY,
+          Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+          "Content-Type": "application/json",
+          Prefer: "resolution=merge-duplicates,return=minimal",
+        },
+        body: JSON.stringify(
+          onConflict.includes("contestant_key")
+            ? rows
+            : dedupedPlaceFallbackRows,
+        ),
+      },
+    );
+
+  let response = await makeRequest(
+    "season_year,event,type,circuit_id_key,contestant_key",
+  );
+
+  if (response.status === 400) {
+    const body = await response.text();
+    if (body.includes("\"contestant_key\" does not exist")) {
+      // Backward compatibility: allow runs before migration is applied.
+      response = await makeRequest("season_year,event,type,circuit_id_key,place");
+    } else {
+      throw new Error(`Supabase upsert failed (${response.status}): ${body}`);
+    }
+  }
 
   if (!response.ok) {
     const body = await response.text();
