@@ -642,7 +642,10 @@ async function getWpra(event, type, year, circuit) {
       .split(/\s+/)
       .filter((part) => part && !part.includes("("));
     const FirstName = name[0];
-    const LastName = name[name.length - 1];
+    const LastName =
+      name[0] === "Brittany" && name[1] === "Pozzi" && name[2] === "Tonozzi"
+        ? "Pozzi Tonozzi"
+        : name[name.length - 1];
     if (!FirstName || !LastName) return;
 
     const Hometown = $(row).find("td:nth-child(3)").text().trim();
