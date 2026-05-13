@@ -132,6 +132,9 @@ function delay(ms) {
 
 function normalizeLookupValue(value) {
   return String(value || "")
+    .normalize("NFKD")
+    .replace(/[^\x00-\x7F]/g, "")
+    .replace(/[^a-zA-Z0-9]+/g, " ")
     .trim()
     .toLowerCase()
     .replace(/\s+/g, " ");
@@ -372,6 +375,8 @@ async function fetchWpraAthleteLookup() {
 
   const byFullKey = new Map();
   const byNameKey = new Map();
+  let athletesWithName = 0;
+  let athletesWithFullKey = 0;
 
   for (const athlete of athletes) {
     if (!Number.isFinite(athlete.contestant_id)) continue;
@@ -382,6 +387,8 @@ async function fetchWpraAthleteLookup() {
       athlete.hometown,
     );
     const nameKey = makeAthleteNameKey(athlete.first_name, athlete.last_name);
+    if (nameKey !== "|") athletesWithName++;
+    if (fullKey !== "||") athletesWithFullKey++;
 
     byFullKey.set(fullKey, {
       contestant_id: athlete.contestant_id,
@@ -405,7 +412,7 @@ async function fetchWpraAthleteLookup() {
   }
 
   console.log(
-    `\n👤 Loaded ${athletes.length} WPRA athlete records for contestant_id matching.`,
+    `\n👤 Loaded ${athletes.length} WPRA athlete records for contestant_id matching (name-ready=${athletesWithName}, fullkey-ready=${athletesWithFullKey}).`,
   );
 
   return {
