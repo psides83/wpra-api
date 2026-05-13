@@ -57,10 +57,7 @@ function normalizeDataApiUrl(rawValue) {
   const value = String(rawValue || "").trim();
   if (!value) return "";
   if (value.startsWith("postgres://") || value.startsWith("postgresql://")) {
-    if (NEON_DATABASE_URL) return "";
-    throw new Error(
-      "NEON_DATA_API_URL must be the Neon Data API HTTP URL (.../rest/v1), not a Postgres connection string.",
-    );
+    return "";
   }
   if (!/^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(value)) {
     return `https://${value}`;
