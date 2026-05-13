@@ -160,6 +160,15 @@ function hometownCityKey(value) {
   return normalizeLookupValue(cityPart);
 }
 
+function pickFirstDefined(obj, keys) {
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(obj, key) && obj[key] != null) {
+      return obj[key];
+    }
+  }
+  return null;
+}
+
 function getEventIdPart(event) {
   if (event === EVENTS.GB) return "1";
   if (event === EVENTS.LB) return "2";
@@ -342,11 +351,35 @@ async function fetchWpraAthleteLookup() {
 
   let athletes = [];
   if (sql) {
-    athletes = await sql`
-      select contestant_id, first_name, last_name, hometown, photo_url
+    const rawAthletes = await sql`
+      select *
       from public.wpra_athletes
-      order by contestant_id asc
     `;
+    athletes = rawAthletes
+      .map((row) => ({
+        contestant_id: pickFirstDefined(row, [
+          "contestant_id",
+          "contestantid",
+          "ContestantId",
+        ]),
+        first_name: pickFirstDefined(row, [
+          "first_name",
+          "firstname",
+          "FirstName",
+        ]),
+        last_name: pickFirstDefined(row, [
+          "last_name",
+          "lastname",
+          "LastName",
+        ]),
+        hometown: pickFirstDefined(row, ["hometown", "HomeTown", "Hometown"]),
+        photo_url: pickFirstDefined(row, ["photo_url", "photourl", "PhotoUrl"]),
+      }))
+      .filter((row) => Number.isFinite(Number(row.contestant_id)))
+      .map((row) => ({
+        ...row,
+        contestant_id: Number(row.contestant_id),
+      }));
   } else {
     if (!SAFE_DATA_API_BASE_URL) return emptyLookup;
 
