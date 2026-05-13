@@ -506,7 +506,7 @@ async function upsertSupabaseRows(filename, payload, athleteLookup) {
   if (sql) {
     for (const row of rows) {
       await sql`
-        insert into public.standings (
+        insert into public.wpra_standings (
           id,
           season_year,
           event,
