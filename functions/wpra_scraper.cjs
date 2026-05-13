@@ -2,6 +2,7 @@ const axios = require("axios");
 const cheerio = require("cheerio");
 const fs = require("fs");
 const path = require("path");
+const { neon } = require("@neondatabase/serverless");
 
 // ---- Constants ----
 const EVENTS = { GB: "GB", LB: "LB" };
@@ -45,6 +46,7 @@ const outputDir =
 if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
 
 const DELAY_MS = 3000;
+const NEON_DATABASE_URL = process.env.NEON_DATABASE_URL || "";
 const DATA_API_BASE_URL =
   process.env.NEON_DATA_API_URL || process.env.SUPABASE_URL || "";
 const DATA_API_KEY =
@@ -104,6 +106,8 @@ function applyDataApiAuthHeaders(headers) {
   }
   return headers;
 }
+
+const sql = NEON_DATABASE_URL ? neon(NEON_DATABASE_URL) : null;
 
 // ---- Helpers ----
 function delay(ms) {
@@ -311,34 +315,43 @@ async function fetchWpraAthleteLookup() {
     byNameKey: new Map(),
   };
 
-  if (!SAFE_DATA_API_BASE_URL) return emptyLookup;
+  let athletes = [];
+  if (sql) {
+    athletes = await sql`
+      select contestant_id, first_name, last_name, hometown, photo_url
+      from public.wpra_athletes
+      order by contestant_id asc
+    `;
+  } else {
+    if (!SAFE_DATA_API_BASE_URL) return emptyLookup;
 
-  const pageSize = 1000;
-  const athletes = [];
+    const pageSize = 1000;
+    athletes = [];
 
-  for (let offset = 0; ; offset += pageSize) {
-    const from = offset;
-    const to = offset + pageSize - 1;
-    const endpoint = `${SAFE_DATA_API_BASE_URL}/wpra_athletes?select=contestant_id,first_name,last_name,hometown,photo_url&order=contestant_id.asc`;
+    for (let offset = 0; ; offset += pageSize) {
+      const from = offset;
+      const to = offset + pageSize - 1;
+      const endpoint = `${SAFE_DATA_API_BASE_URL}/wpra_athletes?select=contestant_id,first_name,last_name,hometown,photo_url&order=contestant_id.asc`;
 
-    const headers = {
-      Accept: "application/json",
-      Range: `${from}-${to}`,
-    };
-    applyDataApiAuthHeaders(headers);
-    const response = await fetch(endpoint, { headers });
+      const headers = {
+        Accept: "application/json",
+        Range: `${from}-${to}`,
+      };
+      applyDataApiAuthHeaders(headers);
+      const response = await fetch(endpoint, { headers });
 
-    if (!response.ok) {
-      const body = await response.text();
-      throw new Error(
-        `Neon athlete lookup failed (${response.status}): ${body}`,
-      );
+      if (!response.ok) {
+        const body = await response.text();
+        throw new Error(
+          `Neon athlete lookup failed (${response.status}): ${body}`,
+        );
+      }
+
+      const page = await response.json();
+      athletes.push(...page);
+
+      if (page.length < pageSize) break;
     }
-
-    const page = await response.json();
-    athletes.push(...page);
-
-    if (page.length < pageSize) break;
   }
 
   const byFullKey = new Map();
@@ -443,8 +456,6 @@ function enrichRowsWithContestantIds(rows, athleteLookup) {
 }
 
 async function upsertSupabaseRows(filename, payload, athleteLookup) {
-  if (!SAFE_DATA_API_BASE_URL) return;
-
   const rows = dedupeSupabaseRows(
     enrichRowsWithContestantIds(
       buildSupabaseRows(filename, payload).filter(
@@ -475,6 +486,61 @@ async function upsertSupabaseRows(filename, payload, athleteLookup) {
       ]),
     ).values(),
   ];
+
+  if (sql) {
+    for (const row of rows) {
+      await sql`
+        insert into public.standings (
+          id,
+          season_year,
+          event,
+          type,
+          circuit_id,
+          contestant_id,
+          photo_url,
+          place,
+          first_name,
+          last_name,
+          hometown,
+          earnings,
+          points,
+          updated_at
+        ) values (
+          ${row.id},
+          ${row.season_year},
+          ${row.event},
+          ${row.type},
+          ${row.circuit_id},
+          ${row.contestant_id},
+          ${row.photo_url},
+          ${row.place},
+          ${row.first_name},
+          ${row.last_name},
+          ${row.hometown},
+          ${row.earnings},
+          ${row.points},
+          ${row.updated_at}
+        )
+        on conflict (id) do update set
+          season_year = excluded.season_year,
+          event = excluded.event,
+          type = excluded.type,
+          circuit_id = excluded.circuit_id,
+          contestant_id = excluded.contestant_id,
+          photo_url = excluded.photo_url,
+          place = excluded.place,
+          first_name = excluded.first_name,
+          last_name = excluded.last_name,
+          hometown = excluded.hometown,
+          earnings = excluded.earnings,
+          points = excluded.points,
+          updated_at = excluded.updated_at
+      `;
+    }
+    return;
+  }
+
+  if (!SAFE_DATA_API_BASE_URL) return;
 
   const makeRequest = async (onConflict) =>
     (async () => {
