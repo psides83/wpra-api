@@ -45,8 +45,12 @@ const outputDir =
 if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
 
 const DELAY_MS = 3000;
-const SUPABASE_URL = process.env.SUPABASE_URL || "";
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+const DATA_API_BASE_URL =
+  process.env.NEON_DATA_API_URL || process.env.SUPABASE_URL || "";
+const DATA_API_KEY =
+  process.env.NEON_DATA_API_KEY ||
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  "";
 
 // ---- Helpers ----
 function delay(ms) {
@@ -254,7 +258,7 @@ async function fetchWpraAthleteLookup() {
     byNameKey: new Map(),
   };
 
-  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) return emptyLookup;
+  if (!DATA_API_BASE_URL || !DATA_API_KEY) return emptyLookup;
 
   const pageSize = 1000;
   const athletes = [];
@@ -262,12 +266,12 @@ async function fetchWpraAthleteLookup() {
   for (let offset = 0; ; offset += pageSize) {
     const from = offset;
     const to = offset + pageSize - 1;
-    const endpoint = `${SUPABASE_URL}/rest/v1/wpra_athletes?select=contestant_id,first_name,last_name,hometown,photo_url&order=contestant_id.asc`;
+    const endpoint = `${DATA_API_BASE_URL}/wpra_athletes?select=contestant_id,first_name,last_name,hometown,photo_url&order=contestant_id.asc`;
 
     const response = await fetch(endpoint, {
       headers: {
-        apikey: SUPABASE_SERVICE_ROLE_KEY,
-        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        apikey: DATA_API_KEY,
+        Authorization: `Bearer ${DATA_API_KEY}`,
         Accept: "application/json",
         Range: `${from}-${to}`,
       },
@@ -276,7 +280,7 @@ async function fetchWpraAthleteLookup() {
     if (!response.ok) {
       const body = await response.text();
       throw new Error(
-        `Supabase athlete lookup failed (${response.status}): ${body}`,
+        `Neon athlete lookup failed (${response.status}): ${body}`,
       );
     }
 
@@ -388,7 +392,7 @@ function enrichRowsWithContestantIds(rows, athleteLookup) {
 }
 
 async function upsertSupabaseRows(filename, payload, athleteLookup) {
-  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) return;
+  if (!DATA_API_BASE_URL || !DATA_API_KEY) return;
 
   const rows = dedupeSupabaseRows(
     enrichRowsWithContestantIds(
@@ -422,11 +426,11 @@ async function upsertSupabaseRows(filename, payload, athleteLookup) {
   ];
 
   const makeRequest = async (onConflict) =>
-    fetch(`${SUPABASE_URL}/rest/v1/standings?on_conflict=${onConflict}`, {
+    fetch(`${DATA_API_BASE_URL}/standings?on_conflict=${onConflict}`, {
       method: "POST",
       headers: {
-        apikey: SUPABASE_SERVICE_ROLE_KEY,
-        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        apikey: DATA_API_KEY,
+        Authorization: `Bearer ${DATA_API_KEY}`,
         "Content-Type": "application/json",
         Prefer: "resolution=merge-duplicates,return=minimal",
       },
@@ -453,13 +457,13 @@ async function upsertSupabaseRows(filename, payload, athleteLookup) {
         "season_year,event,type,circuit_id_key,place",
       );
     } else {
-      throw new Error(`Supabase upsert failed (${response.status}): ${body}`);
+      throw new Error(`Neon upsert failed (${response.status}): ${body}`);
     }
   }
 
   if (!response.ok) {
     const body = await response.text();
-    throw new Error(`Supabase upsert failed (${response.status}): ${body}`);
+    throw new Error(`Neon upsert failed (${response.status}): ${body}`);
   }
 }
 
