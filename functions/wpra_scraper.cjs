@@ -258,7 +258,7 @@ async function fetchWpraAthleteLookup() {
     byNameKey: new Map(),
   };
 
-  if (!DATA_API_BASE_URL || !DATA_API_KEY) return emptyLookup;
+  if (!DATA_API_BASE_URL) return emptyLookup;
 
   const pageSize = 1000;
   const athletes = [];
@@ -268,14 +268,15 @@ async function fetchWpraAthleteLookup() {
     const to = offset + pageSize - 1;
     const endpoint = `${DATA_API_BASE_URL}/wpra_athletes?select=contestant_id,first_name,last_name,hometown,photo_url&order=contestant_id.asc`;
 
-    const response = await fetch(endpoint, {
-      headers: {
-        apikey: DATA_API_KEY,
-        Authorization: `Bearer ${DATA_API_KEY}`,
-        Accept: "application/json",
-        Range: `${from}-${to}`,
-      },
-    });
+    const headers = {
+      Accept: "application/json",
+      Range: `${from}-${to}`,
+    };
+    if (DATA_API_KEY) {
+      headers.apikey = DATA_API_KEY;
+      headers.Authorization = `Bearer ${DATA_API_KEY}`;
+    }
+    const response = await fetch(endpoint, { headers });
 
     if (!response.ok) {
       const body = await response.text();
@@ -392,7 +393,7 @@ function enrichRowsWithContestantIds(rows, athleteLookup) {
 }
 
 async function upsertSupabaseRows(filename, payload, athleteLookup) {
-  if (!DATA_API_BASE_URL || !DATA_API_KEY) return;
+  if (!DATA_API_BASE_URL) return;
 
   const rows = dedupeSupabaseRows(
     enrichRowsWithContestantIds(
@@ -426,18 +427,25 @@ async function upsertSupabaseRows(filename, payload, athleteLookup) {
   ];
 
   const makeRequest = async (onConflict) =>
-    fetch(`${DATA_API_BASE_URL}/standings?on_conflict=${onConflict}`, {
-      method: "POST",
-      headers: {
-        apikey: DATA_API_KEY,
-        Authorization: `Bearer ${DATA_API_KEY}`,
+    (async () => {
+      const headers = {
         "Content-Type": "application/json",
         Prefer: "resolution=merge-duplicates,return=minimal",
-      },
-      body: JSON.stringify(
-        onConflict.includes("contestant_key") ? rows : dedupedPlaceFallbackRows,
-      ),
-    });
+      };
+      if (DATA_API_KEY) {
+        headers.apikey = DATA_API_KEY;
+        headers.Authorization = `Bearer ${DATA_API_KEY}`;
+      }
+      return fetch(`${DATA_API_BASE_URL}/standings?on_conflict=${onConflict}`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(
+          onConflict.includes("contestant_key")
+            ? rows
+            : dedupedPlaceFallbackRows,
+        ),
+      });
+    })();
 
   let response = await makeRequest("id");
 
