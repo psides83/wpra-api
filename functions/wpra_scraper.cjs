@@ -154,6 +154,12 @@ function makeAthleteFullKey(firstName, lastName, hometown) {
   ].join("|");
 }
 
+function hometownCityKey(value) {
+  const raw = String(value || "");
+  const cityPart = raw.split(",")[0] || raw;
+  return normalizeLookupValue(cityPart);
+}
+
 function getEventIdPart(event) {
   if (event === EVENTS.GB) return "1";
   if (event === EVENTS.LB) return "2";
@@ -395,20 +401,14 @@ async function fetchWpraAthleteLookup() {
       photo_url: athlete.photo_url || null,
     });
 
-    const existingNameMatch = byNameKey.get(nameKey);
-    if (!existingNameMatch) {
-      byNameKey.set(nameKey, {
-        contestant_id: athlete.contestant_id,
-        photo_url: athlete.photo_url || null,
-        ambiguous: false,
-      });
-    } else if (existingNameMatch.contestant_id !== athlete.contestant_id) {
-      byNameKey.set(nameKey, {
-        contestant_id: null,
-        photo_url: null,
-        ambiguous: true,
-      });
-    }
+    const existingNameMatches = byNameKey.get(nameKey) || [];
+    existingNameMatches.push({
+      contestant_id: athlete.contestant_id,
+      photo_url: athlete.photo_url || null,
+      hometown: athlete.hometown || null,
+      hometown_city_key: hometownCityKey(athlete.hometown),
+    });
+    byNameKey.set(nameKey, existingNameMatches);
   }
 
   console.log(
@@ -433,13 +433,23 @@ function findAthleteForStanding(row, athleteLookup) {
   if (fullMatch && Number.isFinite(fullMatch.contestant_id)) return fullMatch;
 
   const nameKey = makeAthleteNameKey(row.first_name, row.last_name);
-  const nameMatch = athleteLookup.byNameKey.get(nameKey);
-  if (
-    nameMatch &&
-    !nameMatch.ambiguous &&
-    Number.isFinite(nameMatch.contestant_id)
-  ) {
-    return nameMatch;
+  const nameMatches = athleteLookup.byNameKey.get(nameKey);
+  if (Array.isArray(nameMatches) && nameMatches.length) {
+    if (nameMatches.length === 1) {
+      const only = nameMatches[0];
+      if (Number.isFinite(only.contestant_id)) return only;
+    }
+
+    const rowCity = hometownCityKey(row.hometown);
+    const cityMatches = nameMatches.filter(
+      (candidate) =>
+        candidate.hometown_city_key &&
+        rowCity &&
+        candidate.hometown_city_key === rowCity,
+    );
+    if (cityMatches.length === 1 && Number.isFinite(cityMatches[0].contestant_id)) {
+      return cityMatches[0];
+    }
   }
 
   return null;
