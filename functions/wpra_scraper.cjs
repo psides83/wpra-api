@@ -154,6 +154,14 @@ function makeAthleteFullKey(firstName, lastName, hometown) {
   ].join("|");
 }
 
+function makeDbContestantKey(firstName, lastName, hometown) {
+  return [
+    String(firstName || "").trim().toLowerCase(),
+    String(lastName || "").trim().toLowerCase(),
+    String(hometown || "").trim().toLowerCase(),
+  ].join("|");
+}
+
 function hometownCityKey(value) {
   const raw = String(value || "");
   const cityPart = raw.split(",")[0] || raw;
@@ -345,6 +353,7 @@ function dedupeSupabaseRows(rows) {
 
 async function fetchWpraAthleteLookup() {
   const emptyLookup = {
+    byContestantKey: new Map(),
     byFullKey: new Map(),
     byNameKey: new Map(),
   };
@@ -374,6 +383,10 @@ async function fetchWpraAthleteLookup() {
         ]),
         hometown: pickFirstDefined(row, ["hometown", "HomeTown", "Hometown"]),
         photo_url: pickFirstDefined(row, ["photo_url", "photourl", "PhotoUrl"]),
+        contestant_key: pickFirstDefined(row, [
+          "contestant_key",
+          "ContestantKey",
+        ]),
       }))
       .filter((row) => Number.isFinite(Number(row.contestant_id)))
       .map((row) => ({
@@ -414,6 +427,7 @@ async function fetchWpraAthleteLookup() {
 
   const byFullKey = new Map();
   const byNameKey = new Map();
+  const byContestantKey = new Map();
   let athletesWithName = 0;
   let athletesWithFullKey = 0;
 
@@ -425,11 +439,22 @@ async function fetchWpraAthleteLookup() {
       athlete.last_name,
       athlete.hometown,
     );
+    const contestantKey =
+      athlete.contestant_key ||
+      makeDbContestantKey(
+        athlete.first_name,
+        athlete.last_name,
+        athlete.hometown,
+      );
     const nameKey = makeAthleteNameKey(athlete.first_name, athlete.last_name);
     if (nameKey !== "|") athletesWithName++;
     if (fullKey !== "||") athletesWithFullKey++;
 
     byFullKey.set(fullKey, {
+      contestant_id: athlete.contestant_id,
+      photo_url: athlete.photo_url || null,
+    });
+    byContestantKey.set(contestantKey, {
       contestant_id: athlete.contestant_id,
       photo_url: athlete.photo_url || null,
     });
@@ -449,6 +474,7 @@ async function fetchWpraAthleteLookup() {
   );
 
   return {
+    byContestantKey,
     byFullKey,
     byNameKey,
   };
@@ -456,6 +482,14 @@ async function fetchWpraAthleteLookup() {
 
 function findAthleteForStanding(row, athleteLookup) {
   if (!athleteLookup) return null;
+
+  const contestantKey = makeDbContestantKey(
+    row.first_name,
+    row.last_name,
+    row.hometown,
+  );
+  const keyMatch = athleteLookup.byContestantKey.get(contestantKey);
+  if (keyMatch && Number.isFinite(keyMatch.contestant_id)) return keyMatch;
 
   const fullKey = makeAthleteFullKey(
     row.first_name,
