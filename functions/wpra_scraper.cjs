@@ -51,10 +51,26 @@ const DATA_API_KEY =
   process.env.NEON_DATA_API_KEY ||
   process.env.SUPABASE_SERVICE_ROLE_KEY ||
   "";
+function normalizeDataApiUrl(rawValue) {
+  const value = String(rawValue || "").trim();
+  if (!value) return "";
+  if (value.startsWith("postgres://") || value.startsWith("postgresql://")) {
+    throw new Error(
+      "NEON_DATA_API_URL must be the Neon Data API HTTP URL (.../rest/v1), not a Postgres connection string.",
+    );
+  }
+  if (!/^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(value)) {
+    return `https://${value}`;
+  }
+  return value;
+}
+
+const NORMALIZED_DATA_API_URL = normalizeDataApiUrl(DATA_API_BASE_URL);
+
 const DATA_API_AUTH_FROM_URL = (() => {
-  if (!DATA_API_BASE_URL) return null;
+  if (!NORMALIZED_DATA_API_URL) return null;
   try {
-    const parsed = new URL(DATA_API_BASE_URL);
+    const parsed = new URL(NORMALIZED_DATA_API_URL);
     if (!parsed.username && !parsed.password) return null;
     const token = Buffer.from(
       `${decodeURIComponent(parsed.username)}:${decodeURIComponent(parsed.password)}`,
@@ -66,14 +82,14 @@ const DATA_API_AUTH_FROM_URL = (() => {
   }
 })();
 const SAFE_DATA_API_BASE_URL = (() => {
-  if (!DATA_API_BASE_URL) return "";
+  if (!NORMALIZED_DATA_API_URL) return "";
   try {
-    const parsed = new URL(DATA_API_BASE_URL);
+    const parsed = new URL(NORMALIZED_DATA_API_URL);
     parsed.username = "";
     parsed.password = "";
     return parsed.toString().replace(/\/$/, "");
   } catch {
-    return DATA_API_BASE_URL.replace(/\/$/, "");
+    return NORMALIZED_DATA_API_URL.replace(/\/$/, "");
   }
 })();
 
