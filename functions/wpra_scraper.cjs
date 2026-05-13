@@ -107,6 +107,24 @@ function applyDataApiAuthHeaders(headers) {
 
 const sql = NEON_DATABASE_URL ? neon(NEON_DATABASE_URL) : null;
 
+function getSinkMode() {
+  if (sql) return "neon_sql";
+  if (SAFE_DATA_API_BASE_URL) return "data_api";
+  return "none";
+}
+
+function assertDataSinkConfigured() {
+  const mode = getSinkMode();
+  console.log(
+    `\n🔌 Sink mode: ${mode} (NEON_DATABASE_URL=${NEON_DATABASE_URL ? "set" : "missing"}, NEON_DATA_API_URL=${SAFE_DATA_API_BASE_URL ? "set" : "missing"})`,
+  );
+  if (mode === "none") {
+    throw new Error(
+      "No data sink configured. Set NEON_DATABASE_URL for direct SQL mode (recommended) or NEON_DATA_API_URL for Data API mode.",
+    );
+  }
+}
+
 // ---- Helpers ----
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -808,6 +826,8 @@ async function getWpra(event, type, year, circuit) {
 
 // ---- Runner ----
 async function runAll() {
+  assertDataSinkConfigured();
+
   const currentYear = new Date().getFullYear();
   const startYearDefault = 2014;
   const lbStartYear = 2020;
