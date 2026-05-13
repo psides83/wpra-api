@@ -51,6 +51,43 @@ const DATA_API_KEY =
   process.env.NEON_DATA_API_KEY ||
   process.env.SUPABASE_SERVICE_ROLE_KEY ||
   "";
+const DATA_API_AUTH_FROM_URL = (() => {
+  if (!DATA_API_BASE_URL) return null;
+  try {
+    const parsed = new URL(DATA_API_BASE_URL);
+    if (!parsed.username && !parsed.password) return null;
+    const token = Buffer.from(
+      `${decodeURIComponent(parsed.username)}:${decodeURIComponent(parsed.password)}`,
+      "utf8",
+    ).toString("base64");
+    return `Basic ${token}`;
+  } catch {
+    return null;
+  }
+})();
+const SAFE_DATA_API_BASE_URL = (() => {
+  if (!DATA_API_BASE_URL) return "";
+  try {
+    const parsed = new URL(DATA_API_BASE_URL);
+    parsed.username = "";
+    parsed.password = "";
+    return parsed.toString().replace(/\/$/, "");
+  } catch {
+    return DATA_API_BASE_URL.replace(/\/$/, "");
+  }
+})();
+
+function applyDataApiAuthHeaders(headers) {
+  if (DATA_API_KEY) {
+    headers.apikey = DATA_API_KEY;
+    headers.Authorization = `Bearer ${DATA_API_KEY}`;
+    return headers;
+  }
+  if (DATA_API_AUTH_FROM_URL) {
+    headers.Authorization = DATA_API_AUTH_FROM_URL;
+  }
+  return headers;
+}
 
 // ---- Helpers ----
 function delay(ms) {
@@ -258,7 +295,7 @@ async function fetchWpraAthleteLookup() {
     byNameKey: new Map(),
   };
 
-  if (!DATA_API_BASE_URL) return emptyLookup;
+  if (!SAFE_DATA_API_BASE_URL) return emptyLookup;
 
   const pageSize = 1000;
   const athletes = [];
@@ -266,16 +303,13 @@ async function fetchWpraAthleteLookup() {
   for (let offset = 0; ; offset += pageSize) {
     const from = offset;
     const to = offset + pageSize - 1;
-    const endpoint = `${DATA_API_BASE_URL}/wpra_athletes?select=contestant_id,first_name,last_name,hometown,photo_url&order=contestant_id.asc`;
+    const endpoint = `${SAFE_DATA_API_BASE_URL}/wpra_athletes?select=contestant_id,first_name,last_name,hometown,photo_url&order=contestant_id.asc`;
 
     const headers = {
       Accept: "application/json",
       Range: `${from}-${to}`,
     };
-    if (DATA_API_KEY) {
-      headers.apikey = DATA_API_KEY;
-      headers.Authorization = `Bearer ${DATA_API_KEY}`;
-    }
+    applyDataApiAuthHeaders(headers);
     const response = await fetch(endpoint, { headers });
 
     if (!response.ok) {
@@ -393,7 +427,7 @@ function enrichRowsWithContestantIds(rows, athleteLookup) {
 }
 
 async function upsertSupabaseRows(filename, payload, athleteLookup) {
-  if (!DATA_API_BASE_URL) return;
+  if (!SAFE_DATA_API_BASE_URL) return;
 
   const rows = dedupeSupabaseRows(
     enrichRowsWithContestantIds(
@@ -432,11 +466,8 @@ async function upsertSupabaseRows(filename, payload, athleteLookup) {
         "Content-Type": "application/json",
         Prefer: "resolution=merge-duplicates,return=minimal",
       };
-      if (DATA_API_KEY) {
-        headers.apikey = DATA_API_KEY;
-        headers.Authorization = `Bearer ${DATA_API_KEY}`;
-      }
-      return fetch(`${DATA_API_BASE_URL}/standings?on_conflict=${onConflict}`, {
+      applyDataApiAuthHeaders(headers);
+      return fetch(`${SAFE_DATA_API_BASE_URL}/standings?on_conflict=${onConflict}`, {
         method: "POST",
         headers,
         body: JSON.stringify(
