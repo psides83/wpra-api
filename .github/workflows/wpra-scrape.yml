@@ -49,8 +49,6 @@ jobs:
           WPRA_OUTPUT_DIR: ${{ github.workspace }}/wpra-json
           WPRA_REFRESH_YEARS: ${{ github.event.inputs.refresh_years || '' }}
           NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
-          NEON_DATA_API_URL: ${{ secrets.NEON_DATA_API_URL }}
-          NEON_DATA_API_KEY: ${{ secrets.NEON_DATA_API_KEY }}
         run: node wpra_scraper.cjs
 
       - name: Commit and push data changes

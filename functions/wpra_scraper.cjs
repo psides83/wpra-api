@@ -47,80 +47,15 @@ if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
 
 const DELAY_MS = 3000;
 const NEON_DATABASE_URL = process.env.NEON_DATABASE_URL || "";
-const DATA_API_BASE_URL =
-  process.env.NEON_DATA_API_URL || process.env.SUPABASE_URL || "";
-const DATA_API_KEY =
-  process.env.NEON_DATA_API_KEY ||
-  process.env.SUPABASE_SERVICE_ROLE_KEY ||
-  "";
-function normalizeDataApiUrl(rawValue) {
-  const value = String(rawValue || "").trim();
-  if (!value) return "";
-  if (value.startsWith("postgres://") || value.startsWith("postgresql://")) {
-    return "";
-  }
-  if (!/^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(value)) {
-    return `https://${value}`;
-  }
-  return value;
-}
-
-const NORMALIZED_DATA_API_URL = normalizeDataApiUrl(DATA_API_BASE_URL);
-
-const DATA_API_AUTH_FROM_URL = (() => {
-  if (!NORMALIZED_DATA_API_URL) return null;
-  try {
-    const parsed = new URL(NORMALIZED_DATA_API_URL);
-    if (!parsed.username && !parsed.password) return null;
-    const token = Buffer.from(
-      `${decodeURIComponent(parsed.username)}:${decodeURIComponent(parsed.password)}`,
-      "utf8",
-    ).toString("base64");
-    return `Basic ${token}`;
-  } catch {
-    return null;
-  }
-})();
-const SAFE_DATA_API_BASE_URL = (() => {
-  if (!NORMALIZED_DATA_API_URL) return "";
-  try {
-    const parsed = new URL(NORMALIZED_DATA_API_URL);
-    parsed.username = "";
-    parsed.password = "";
-    return parsed.toString().replace(/\/$/, "");
-  } catch {
-    return NORMALIZED_DATA_API_URL.replace(/\/$/, "");
-  }
-})();
-
-function applyDataApiAuthHeaders(headers) {
-  if (DATA_API_KEY) {
-    headers.apikey = DATA_API_KEY;
-    headers.Authorization = `Bearer ${DATA_API_KEY}`;
-    return headers;
-  }
-  if (DATA_API_AUTH_FROM_URL) {
-    headers.Authorization = DATA_API_AUTH_FROM_URL;
-  }
-  return headers;
-}
-
 const sql = NEON_DATABASE_URL ? neon(NEON_DATABASE_URL) : null;
 
-function getSinkMode() {
-  if (sql) return "neon_sql";
-  if (SAFE_DATA_API_BASE_URL) return "data_api";
-  return "none";
-}
-
 function assertDataSinkConfigured() {
-  const mode = getSinkMode();
   console.log(
-    `\n🔌 Sink mode: ${mode} (NEON_DATABASE_URL=${NEON_DATABASE_URL ? "set" : "missing"}, NEON_DATA_API_URL=${SAFE_DATA_API_BASE_URL ? "set" : "missing"})`,
+    `\n🔌 Sink mode: neon_sql (NEON_DATABASE_URL=${NEON_DATABASE_URL ? "set" : "missing"})`,
   );
-  if (mode === "none") {
+  if (!sql) {
     throw new Error(
-      "No data sink configured. Set NEON_DATABASE_URL for direct SQL mode (recommended) or NEON_DATA_API_URL for Data API mode.",
+      "No data sink configured. Set NEON_DATABASE_URL for direct Neon SQL mode.",
     );
   }
 }
@@ -358,72 +293,28 @@ async function fetchWpraAthleteLookup() {
     byNameKey: new Map(),
   };
 
-  let athletes = [];
-  if (sql) {
-    const rawAthletes = await sql`
-      select *
-      from public.wpra_athletes
-    `;
-    athletes = rawAthletes
-      .map((row) => ({
-        contestant_id: pickFirstDefined(row, [
-          "contestant_id",
-          "contestantid",
-          "ContestantId",
-        ]),
-        first_name: pickFirstDefined(row, [
-          "first_name",
-          "firstname",
-          "FirstName",
-        ]),
-        last_name: pickFirstDefined(row, [
-          "last_name",
-          "lastname",
-          "LastName",
-        ]),
-        hometown: pickFirstDefined(row, ["hometown", "HomeTown", "Hometown"]),
-        photo_url: pickFirstDefined(row, ["photo_url", "photourl", "PhotoUrl"]),
-        contestant_key: pickFirstDefined(row, [
-          "contestant_key",
-          "ContestantKey",
-        ]),
-      }))
-      .filter((row) => Number.isFinite(Number(row.contestant_id)))
-      .map((row) => ({
-        ...row,
-        contestant_id: Number(row.contestant_id),
-      }));
-  } else {
-    if (!SAFE_DATA_API_BASE_URL) return emptyLookup;
-
-    const pageSize = 1000;
-    athletes = [];
-
-    for (let offset = 0; ; offset += pageSize) {
-      const from = offset;
-      const to = offset + pageSize - 1;
-      const endpoint = `${SAFE_DATA_API_BASE_URL}/wpra_athletes?select=contestant_id,first_name,last_name,hometown,photo_url&order=contestant_id.asc`;
-
-      const headers = {
-        Accept: "application/json",
-        Range: `${from}-${to}`,
-      };
-      applyDataApiAuthHeaders(headers);
-      const response = await fetch(endpoint, { headers });
-
-      if (!response.ok) {
-        const body = await response.text();
-        throw new Error(
-          `Neon athlete lookup failed (${response.status}): ${body}`,
-        );
-      }
-
-      const page = await response.json();
-      athletes.push(...page);
-
-      if (page.length < pageSize) break;
-    }
-  }
+  const rawAthletes = await sql`
+    select *
+    from public.wpra_athletes
+  `;
+  const athletes = rawAthletes
+    .map((row) => ({
+      contestant_id: pickFirstDefined(row, [
+        "contestant_id",
+        "contestantid",
+        "ContestantId",
+      ]),
+      first_name: pickFirstDefined(row, ["first_name", "firstname", "FirstName"]),
+      last_name: pickFirstDefined(row, ["last_name", "lastname", "LastName"]),
+      hometown: pickFirstDefined(row, ["hometown", "HomeTown", "Hometown"]),
+      photo_url: pickFirstDefined(row, ["photo_url", "photourl", "PhotoUrl"]),
+      contestant_key: pickFirstDefined(row, ["contestant_key", "ContestantKey"]),
+    }))
+    .filter((row) => Number.isFinite(Number(row.contestant_id)))
+    .map((row) => ({
+      ...row,
+      contestant_id: Number(row.contestant_id),
+    }));
 
   const byFullKey = new Map();
   const byNameKey = new Map();
@@ -566,125 +457,54 @@ async function upsertSupabaseRows(filename, payload, athleteLookup) {
   );
   if (!rows.length) return;
 
-  const placeFallbackRows = enrichRowsWithContestantIds(
-    buildSupabaseRows(filename, payload).filter(
-      (row) => Number.isFinite(row.place) && row.place > 0,
-    ),
-    athleteLookup,
-  );
-  const dedupedPlaceFallbackRows = [
-    ...new Map(
-      placeFallbackRows.map((row) => [
-        [
-          row.season_year,
-          row.event,
-          row.type,
-          row.circuit_id ?? -1,
-          row.place,
-        ].join("|"),
-        row,
-      ]),
-    ).values(),
-  ];
-
-  if (sql) {
-    for (const row of rows) {
-      await sql`
-        insert into public.wpra_standings (
-          id,
-          season_year,
-          event,
-          type,
-          circuit_id,
-          contestant_id,
-          photo_url,
-          place,
-          first_name,
-          last_name,
-          hometown,
-          earnings,
-          points,
-          updated_at
-        ) values (
-          ${row.id},
-          ${row.season_year},
-          ${row.event},
-          ${row.type},
-          ${row.circuit_id},
-          ${row.contestant_id},
-          ${row.photo_url},
-          ${row.place},
-          ${row.first_name},
-          ${row.last_name},
-          ${row.hometown},
-          ${row.earnings},
-          ${row.points},
-          ${row.updated_at}
-        )
-        on conflict (id) do update set
-          season_year = excluded.season_year,
-          event = excluded.event,
-          type = excluded.type,
-          circuit_id = excluded.circuit_id,
-          contestant_id = excluded.contestant_id,
-          photo_url = excluded.photo_url,
-          place = excluded.place,
-          first_name = excluded.first_name,
-          last_name = excluded.last_name,
-          hometown = excluded.hometown,
-          earnings = excluded.earnings,
-          points = excluded.points,
-          updated_at = excluded.updated_at
-      `;
-    }
-    return;
-  }
-
-  if (!SAFE_DATA_API_BASE_URL) return;
-
-  const makeRequest = async (onConflict) =>
-    (async () => {
-      const headers = {
-        "Content-Type": "application/json",
-        Prefer: "resolution=merge-duplicates,return=minimal",
-      };
-      applyDataApiAuthHeaders(headers);
-      return fetch(`${SAFE_DATA_API_BASE_URL}/standings?on_conflict=${onConflict}`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(
-          onConflict.includes("contestant_key")
-            ? rows
-            : dedupedPlaceFallbackRows,
-        ),
-      });
-    })();
-
-  let response = await makeRequest("id");
-
-  if (response.status === 400) {
-    const body = await response.text();
-    if (
-      body.includes('"id"') ||
-      body.includes("there is no unique or exclusion constraint")
-    ) {
-      // Backward compatibility: allow runs before the id-based upsert migration is applied.
-      response = await makeRequest(
-        "season_year,event,type,circuit_id_key,contestant_key",
-      );
-    } else if (body.includes('"contestant_key" does not exist')) {
-      // Backward compatibility: allow runs before the contestant_key migration is applied.
-      response = await makeRequest(
-        "season_year,event,type,circuit_id_key,place",
-      );
-    } else {
-      throw new Error(`Neon upsert failed (${response.status}): ${body}`);
-    }
-  }
-
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Neon upsert failed (${response.status}): ${body}`);
+  for (const row of rows) {
+    await sql`
+      insert into public.wpra_standings (
+        id,
+        season_year,
+        event,
+        type,
+        circuit_id,
+        contestant_id,
+        photo_url,
+        place,
+        first_name,
+        last_name,
+        hometown,
+        earnings,
+        points,
+        updated_at
+      ) values (
+        ${row.id},
+        ${row.season_year},
+        ${row.event},
+        ${row.type},
+        ${row.circuit_id},
+        ${row.contestant_id},
+        ${row.photo_url},
+        ${row.place},
+        ${row.first_name},
+        ${row.last_name},
+        ${row.hometown},
+        ${row.earnings},
+        ${row.points},
+        ${row.updated_at}
+      )
+      on conflict (id) do update set
+        season_year = excluded.season_year,
+        event = excluded.event,
+        type = excluded.type,
+        circuit_id = excluded.circuit_id,
+        contestant_id = excluded.contestant_id,
+        photo_url = excluded.photo_url,
+        place = excluded.place,
+        first_name = excluded.first_name,
+        last_name = excluded.last_name,
+        hometown = excluded.hometown,
+        earnings = excluded.earnings,
+        points = excluded.points,
+        updated_at = excluded.updated_at
+    `;
   }
 }
 
