@@ -834,4 +834,7 @@ async function runAll() {
 }
 
 // ---- Run ----
-runAll().catch(console.error);
+runAll().catch((err) => {
+  console.error(err);
+  process.exitCode = 1;
+});
