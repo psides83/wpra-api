@@ -53,3 +53,60 @@ test('unpublished next-season tables can be skipped even during a forced refresh
   // Rows present but unparseable must still be treated as a failure.
   assert.equal(isExpectedEmptyStandings({ ...result, unpublished: false }, 2027, 2026), false);
 });
+
+test('Neon-only runner skips loaded history and unpublished 2027 tables', async () => {
+  const fs = require('node:fs');
+  const vm = require('node:vm');
+  const inserts = [];
+  const requests = [];
+  const history = [];
+  for (let year = 2014; year <= 2025; year++) {
+    for (const event of ['GB', 'LB']) {
+      for (const type of ['world', 'rookie', 'circuit']) {
+        for (const circuit_id of type === 'circuit' ? Array.from({length: 13}, (_, i) => i + 1) : [null]) {
+          history.push({ season_year: year, event, type, circuit_id });
+        }
+      }
+    }
+  }
+  const fakeSql = async (parts, ...values) => {
+    const query = parts.join('?');
+    if (query.includes('select distinct')) return history;
+    if (query.includes('from public.wpra_athletes')) return [];
+    assert.match(query, /insert into public.wpra_standings/);
+    inserts.push(values);
+    return [];
+  };
+  class FixedDate extends Date {
+    constructor(...args) { super(...(args.length ? args : ['2026-10-19T20:00:00Z'])); }
+  }
+  const context = {
+    module: { exports: {} },
+    require(name) {
+      if (name === '@neondatabase/serverless') return { neon: () => fakeSql };
+      if (name === 'axios') return { get: async (url) => {
+        const parsed = new URL(url);
+        const year = Number(parsed.searchParams.get('standingYear'));
+        assert.ok(year === 2026 || year === 2027, 'loaded historical groups must be skipped');
+        requests.push(url);
+        const emptyRookie = year === 2027 && parsed.pathname.includes('rookie');
+        return { status: 200, data: emptyRookie
+          ? `<table class="wpra-standings-table" id="${year}-Rookie-Standings-table"><tr><th>Rank</th></tr></table>`
+          : page(year) };
+      }};
+      return require(name);
+    },
+    process: { env: { NEON_DATABASE_URL: 'mock', WPRA_SEASON_YEAR: '2027', WPRA_REFRESH_YEARS: '2026,2027' }, stdout: { write() {} } },
+    console: { log() {}, warn() {}, error() {} },
+    setTimeout(callback) { callback(); },
+    Date: FixedDate,
+    URLSearchParams,
+  };
+  const source = fs.readFileSync(require.resolve('./wpra_scraper.cjs'), 'utf8');
+  vm.runInNewContext(source + '\nmodule.exports.runAll = runAll;', context);
+  await context.module.exports.runAll();
+  assert.equal(requests.length, 60);
+  assert.equal(inserts.length, 58, 'two unpublished rookie tables must not write to Neon');
+  assert.deepEqual([...new Set(inserts.map(values => values[1]))].sort(), [2026, 2027]);
+  assert.ok(inserts.every(values => values[4] === null || (values[4] >= 1 && values[4] <= 13)));
+});

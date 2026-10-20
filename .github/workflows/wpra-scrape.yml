@@ -27,13 +27,6 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Checkout data repo
-        uses: actions/checkout@v6
-        with:
-          repository: psides83/wpra-json
-          token: ${{ secrets.WPRA_JSON_REPO_TOKEN }}
-          path: wpra-json
-
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
@@ -49,20 +42,6 @@ jobs:
 
       - name: Run scraper
         env:
-          WPRA_OUTPUT_DIR: ${{ github.workspace }}/wpra-json
           WPRA_REFRESH_YEARS: ${{ github.event.inputs.refresh_years || '' }}
           NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
         run: node wpra_scraper.cjs
-
-      - name: Commit and push data changes
-        working-directory: ${{ github.workspace }}/wpra-json
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          if git diff --cached --quiet; then
-            echo "No data changes to commit."
-            exit 0
-          fi
-          git commit -m "chore(data): refresh WPRA standings"
-          git push origin HEAD:main

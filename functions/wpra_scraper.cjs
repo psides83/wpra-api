@@ -1,7 +1,5 @@
 const axios = require("axios");
 const cheerio = require("cheerio");
-const fs = require("fs");
-const path = require("path");
 const { neon } = require("@neondatabase/serverless");
 
 // ---- Constants ----
@@ -39,11 +37,6 @@ const CIRCUIT_SVC_MODIFIERS = {
   turquoise: "tq",
   wilderness: "wi",
 };
-
-const outputDir =
-  process.env.WPRA_OUTPUT_DIR || path.resolve(__dirname, "data");
-
-if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
 
 const DELAY_MS = 3000;
 const NEON_DATABASE_URL = process.env.NEON_DATABASE_URL || "";
@@ -147,105 +140,7 @@ function progressBar(current, total) {
   process.stdout.write(`\rProgress: [${filled}${empty}] ${percent}%`);
 }
 
-function writeTimestampHTML() {
-  const timestamp = new Date().toLocaleString("en-US", {
-    timeZone: "America/Chicago",
-    dateStyle: "medium",
-    timeStyle: "long",
-  });
-  const htmlPath = path.join(outputDir, "index.html");
-  fs.writeFileSync(
-    htmlPath,
-    `<p>Last updated: ${timestamp} (Central Time)</p>\n`,
-    "utf-8",
-  );
-  console.log(`\n🕒 Updated timestamp file: ${htmlPath}`);
-}
-
-function hasExistingOutput(year, type, id, event) {
-  const modernName = path.join(
-    outputDir,
-    `standings-year=${year}&type=${type}&id=${id}&event=${event}.json`,
-  );
-  const legacyName = path.join(
-    outputDir,
-    `standings?year=${year}&type=${type}&id=${id}&event=${event}.json`,
-  );
-  return fs.existsSync(modernName) || fs.existsSync(legacyName);
-}
-
-function parseFileMetadata(filename) {
-  const base = path.basename(filename);
-  if (!base.endsWith(".json")) return null;
-  const paramsString = base
-    .replace(/^standings[-?]/, "")
-    .replace(/\.json$/, "");
-  const params = new URLSearchParams(paramsString);
-  const type = params.get("type");
-  const year = Number.parseInt(params.get("year") || "", 10);
-  const circuitIdRaw = params.get("id");
-  const event = params.get("event");
-  if (!type || !Number.isFinite(year) || !event || circuitIdRaw === null) {
-    return null;
-  }
-  const circuitId =
-    circuitIdRaw === "" ? null : Number.parseInt(circuitIdRaw, 10);
-  return {
-    type,
-    year,
-    event,
-    circuitId: Number.isFinite(circuitId) ? circuitId : null,
-  };
-}
-
-function normalizePayloadForFile(filename, payload) {
-  const meta = parseFileMetadata(filename);
-  if (!meta || !payload || !Array.isArray(payload.data)) return payload;
-
-  const normalizedData = payload.data.map((row) => ({
-    ...row,
-    Type: meta.type,
-    Event: meta.event,
-    SeasonYear: meta.year,
-    ...(meta.circuitId !== null ? { CircuitId: meta.circuitId } : {}),
-  }));
-
-  return {
-    ...payload,
-    data: normalizedData,
-  };
-}
-
-function writeNormalizedPayload(filename, payload) {
-  const normalized = normalizePayloadForFile(filename, payload);
-  fs.writeFileSync(filename, JSON.stringify(normalized, null, 2));
-  return normalized;
-}
-
-function normalizeExistingOutputFiles() {
-  const files = fs
-    .readdirSync(outputDir)
-    .filter((name) => name.startsWith("standings") && name.endsWith(".json"));
-  let normalizedCount = 0;
-
-  for (const file of files) {
-    const filename = path.join(outputDir, file);
-    let payload;
-    try {
-      payload = JSON.parse(fs.readFileSync(filename, "utf-8"));
-    } catch {
-      continue;
-    }
-    const normalized = normalizePayloadForFile(filename, payload);
-    fs.writeFileSync(filename, JSON.stringify(normalized, null, 2));
-    normalizedCount++;
-  }
-
-  console.log(`\n🧹 Normalized ${normalizedCount} existing output files.`);
-}
-
-function buildSupabaseRows(filename, payload) {
-  const meta = parseFileMetadata(filename);
+function buildNeonRows(meta, payload) {
   if (!meta || !payload || !Array.isArray(payload.data)) return [];
 
   return payload.data.map((row) => ({
@@ -268,7 +163,7 @@ function buildSupabaseRows(filename, payload) {
   }));
 }
 
-function dedupeSupabaseRows(rows) {
+function dedupeNeonRows(rows) {
   const byKey = new Map();
   for (const row of rows) {
     const contestantKey = row.contestant_id
@@ -446,10 +341,10 @@ function enrichRowsWithContestantIds(rows, athleteLookup) {
   return enriched;
 }
 
-async function upsertSupabaseRows(filename, payload, athleteLookup) {
-  const rows = dedupeSupabaseRows(
+async function upsertNeonRows(meta, payload, athleteLookup) {
+  const rows = dedupeNeonRows(
     enrichRowsWithContestantIds(
-      buildSupabaseRows(filename, payload).filter(
+      buildNeonRows(meta, payload).filter(
         (row) => Number.isFinite(row.place) && row.place > 0,
       ),
       athleteLookup,
@@ -722,6 +617,10 @@ function isExpectedEmptyStandings(result, year, calendarYear) {
     && result.data.length === 0;
 }
 
+function standingsGroupKey({ year, event, type, circuitId }) {
+  return [year, event, type, circuitId ?? ""].join("|");
+}
+
 // ---- Runner ----
 async function runAll() {
   assertDataSinkConfigured();
@@ -744,115 +643,58 @@ async function runAll() {
   const types = Object.values(TYPE);
   const athleteLookup = await fetchWpraAthleteLookup();
 
-  // Compute total tasks
-  let totalTasks = 0;
+  const existingGroups = await sql`
+    select distinct season_year, event, type, circuit_id
+    from public.wpra_standings
+  `;
+  const existing = new Set(existingGroups.map((row) => standingsGroupKey({
+    year: row.season_year,
+    event: row.event,
+    type: row.type,
+    circuitId: row.circuit_id,
+  })));
+  const tasks = [];
   for (const event of events) {
     const startYear = event === EVENTS.LB ? lbStartYear : startYearDefault;
     for (const type of types) {
-      if (type === TYPE.CIRCUIT) {
-        totalTasks += circuits.length * (endYear - startYear + 1);
-      } else {
-        totalTasks += endYear - startYear + 1;
+      const groups = type === TYPE.CIRCUIT ? circuits : [null];
+      for (const circuit of groups) {
+        for (let year = startYear; year <= endYear; year++) {
+          tasks.push({ year, event, type, circuitId: circuit?.id ?? null,
+            circuitTitle: circuit?.title });
+        }
       }
     }
   }
 
   let completed = 0;
   let failedTasks = 0;
-
-  // Actual run
-  for (const event of events) {
-    const startYear = event === EVENTS.LB ? lbStartYear : startYearDefault;
-
-    for (const type of types) {
-      if (type === TYPE.CIRCUIT) {
-        for (const circuit of circuits) {
-          for (let year = startYear; year <= endYear; year++) {
-            const filename = path.join(
-              outputDir,
-              `standings-year=${year}&type=${type}&id=${circuit.id}&event=${event}.json`,
-            );
-
-            if (
-              year < currentYear &&
-              !forcedRefreshYears.has(year) &&
-              hasExistingOutput(year, type, circuit.id, event)
-            ) {
-              completed++;
-              progressBar(completed, totalTasks);
-              continue;
-            }
-
-            const result = await getWpra(
-              event,
-              type,
-              year,
-              circuit.title,
-            );
-            const { error, data } = result;
-            if (error || !data.length) {
-              console.warn(`Preserving ${filename}: ${error || "empty standings"}`);
-              if (!isExpectedEmptyStandings(result, year, currentYear) &&
-                  (year >= currentYear || forcedRefreshYears.has(year))) failedTasks++;
-              completed++;
-              await delay(DELAY_MS);
-              continue;
-            }
-            const normalized = writeNormalizedPayload(filename, {
-              error,
-              data,
-            });
-            await upsertSupabaseRows(filename, normalized, athleteLookup);
-            completed++;
-            progressBar(completed, totalTasks);
-            await delay(DELAY_MS);
-          }
-        }
-      } else {
-        for (let year = startYear; year <= endYear; year++) {
-          const filename = path.join(
-            outputDir,
-            `standings-year=${year}&type=${type}&id=&event=${event}.json`,
-          );
-
-          if (
-            year < currentYear &&
-            !forcedRefreshYears.has(year) &&
-            hasExistingOutput(year, type, "", event)
-          ) {
-            completed++;
-            progressBar(completed, totalTasks);
-            continue;
-          }
-
-          const result = await getWpra(event, type, year);
-          const { error, data } = result;
-          if (error || !data.length) {
-            console.warn(`Preserving ${filename}: ${error || "empty standings"}`);
-            if (!isExpectedEmptyStandings(result, year, currentYear) &&
-                  (year >= currentYear || forcedRefreshYears.has(year))) failedTasks++;
-            completed++;
-            await delay(DELAY_MS);
-            continue;
-          }
-          const normalized = writeNormalizedPayload(filename, { error, data });
-          await upsertSupabaseRows(filename, normalized, athleteLookup);
-          completed++;
-          progressBar(completed, totalTasks);
-          await delay(DELAY_MS);
-        }
-      }
+  for (const task of tasks) {
+    if (task.year < currentYear && !forcedRefreshYears.has(task.year)
+        && existing.has(standingsGroupKey(task))) {
+      progressBar(++completed, tasks.length);
+      continue;
     }
+    const result = await getWpra(task.event, task.type, task.year, task.circuitTitle);
+    if (result.error || !result.data.length) {
+      console.warn(`Preserving Neon standings ${standingsGroupKey(task)}: ${result.error || "empty standings"}`);
+      if (!isExpectedEmptyStandings(result, task.year, currentYear)
+          && (task.year >= currentYear || forcedRefreshYears.has(task.year))) {
+        failedTasks++;
+      }
+    } else {
+      await upsertNeonRows(task, result, athleteLookup);
+    }
+    progressBar(++completed, tasks.length);
+    await delay(DELAY_MS);
   }
 
   if (failedTasks) throw new Error(`${failedTasks} standings requests failed; existing data preserved.`);
   process.stdout.write("\n🏁 All scraping complete!\n");
-  normalizeExistingOutputFiles();
-  writeTimestampHTML();
 }
 
 // ---- Run ----
-module.exports = { getWpra, selectSeasonTable, getActiveSeasonYear, isExpectedEmptyStandings };
+module.exports = { getWpra, selectSeasonTable, getActiveSeasonYear, isExpectedEmptyStandings, buildNeonRows, standingsGroupKey };
 if (require.main === module) {
   runAll().catch((err) => {
     console.error(err);
