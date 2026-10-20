@@ -709,7 +709,17 @@ async function getWpra(event, type, year, circuit) {
   });
 
   const data = rawData.slice(0, 50);
-  return { error: null, data };
+  return {
+    error: null,
+    data,
+    // A correctly labelled table with headers only has no published results yet.
+    unpublished: year >= 2026 && rows.find("td").length === 0,
+  };
+}
+
+function isExpectedEmptyStandings(result, year, calendarYear) {
+  return year > calendarYear && !result.error && result.unpublished === true
+    && result.data.length === 0;
 }
 
 // ---- Runner ----
@@ -773,15 +783,17 @@ async function runAll() {
               continue;
             }
 
-            const { error, data } = await getWpra(
+            const result = await getWpra(
               event,
               type,
               year,
               circuit.title,
             );
+            const { error, data } = result;
             if (error || !data.length) {
               console.warn(`Preserving ${filename}: ${error || "empty standings"}`);
-              if ((year >= currentYear && error) || year === currentYear || forcedRefreshYears.has(year)) failedTasks++;
+              if (!isExpectedEmptyStandings(result, year, currentYear) &&
+                  (year >= currentYear || forcedRefreshYears.has(year))) failedTasks++;
               completed++;
               await delay(DELAY_MS);
               continue;
@@ -813,10 +825,12 @@ async function runAll() {
             continue;
           }
 
-          const { error, data } = await getWpra(event, type, year);
+          const result = await getWpra(event, type, year);
+          const { error, data } = result;
           if (error || !data.length) {
             console.warn(`Preserving ${filename}: ${error || "empty standings"}`);
-            if ((year >= currentYear && error) || year === currentYear || forcedRefreshYears.has(year)) failedTasks++;
+            if (!isExpectedEmptyStandings(result, year, currentYear) &&
+                  (year >= currentYear || forcedRefreshYears.has(year))) failedTasks++;
             completed++;
             await delay(DELAY_MS);
             continue;
@@ -838,7 +852,7 @@ async function runAll() {
 }
 
 // ---- Run ----
-module.exports = { getWpra, selectSeasonTable, getActiveSeasonYear };
+module.exports = { getWpra, selectSeasonTable, getActiveSeasonYear, isExpectedEmptyStandings };
 if (require.main === module) {
   runAll().catch((err) => {
     console.error(err);

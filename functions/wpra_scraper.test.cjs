@@ -2,7 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const axios = require('axios');
 const cheerio = require('cheerio');
-const { getWpra, selectSeasonTable, getActiveSeasonYear } = require('./wpra_scraper.cjs');
+const { getWpra, selectSeasonTable, getActiveSeasonYear, isExpectedEmptyStandings } = require('./wpra_scraper.cjs');
 
 function page(year, name = 'Correct Rider') {
   return `<nav>2026 Rookie Standings</nav><table><tr><td>1</td><td>Wrong Rider</td><td>TX</td><td>999</td></tr></table>
@@ -38,4 +38,18 @@ test('explicit season and service for both events and all standings categories',
   axios.get = async () => ({ status: 200, data: page(2027) });
   assert.equal(await getActiveSeasonYear(), 2027);
   await assert.rejects(() => getWpra('GB', 'world', 2026), /Season mismatch/);
+});
+
+test('unpublished next-season tables can be skipped even during a forced refresh', async (t) => {
+  const original = axios.get;
+  t.after(() => { axios.get = original; });
+  axios.get = async () => ({ status: 200, data:
+    '<table class="wpra-standings-table" id="2027-Rookie-Standings-table"><tr><th>Rank</th><th>Name</th></tr></table>' });
+  const result = await getWpra('GB', 'rookie', 2027);
+  assert.equal(result.unpublished, true);
+  assert.equal(isExpectedEmptyStandings(result, 2027, 2026), true);
+  assert.equal(isExpectedEmptyStandings(result, 2027, 2027), false);
+  assert.equal(isExpectedEmptyStandings({ ...result, error: 'HTTP 500' }, 2027, 2026), false);
+  // Rows present but unparseable must still be treated as a failure.
+  assert.equal(isExpectedEmptyStandings({ ...result, unpublished: false }, 2027, 2026), false);
 });
