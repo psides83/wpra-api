@@ -44,6 +44,9 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Test scraper season safeguards
+        run: node --test wpra_scraper.test.cjs
+
       - name: Run scraper
         env:
           WPRA_OUTPUT_DIR: ${{ github.workspace }}/wpra-json

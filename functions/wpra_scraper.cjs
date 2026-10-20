@@ -508,9 +508,31 @@ async function upsertSupabaseRows(filename, payload, athleteLookup) {
   }
 }
 
+function selectSeasonTable($, year) {
+  const tables = $("table.wpra-standings-table");
+  if (!tables.length) throw new Error(`No season-labelled standings table for ${year}`);
+  for (const table of tables.toArray()) {
+    const actualYear = Number(($(table).attr("id") || "").match(/^(20\d{2})-/)?.[1]);
+    if (actualYear !== year) {
+      throw new Error(`Season mismatch: requested ${year}, table reports ${actualYear || "unknown"}`);
+    }
+  }
+  return tables.first();
+}
+
+async function getActiveSeasonYear() {
+  const response = await axios.get(
+    "https://wpra.com/pro-rodeo-world-standings/?svcUrl=pro-gb-world",
+    { timeout: 15000 },
+  );
+  const $ = cheerio.load(response.data);
+  const year = Number(($("table.wpra-standings-table").first().attr("id") || "").match(/^(20\d{2})-/)?.[1]);
+  selectSeasonTable($, year);
+  return year;
+}
+
 // ---- Scraper ----
 async function getWpra(event, type, year, circuit) {
-  const currentYear = new Date().getFullYear();
   const circuitName = decodeURIComponent(circuit || "")
     .toLowerCase()
     .trim();
@@ -551,59 +573,17 @@ async function getWpra(event, type, year, circuit) {
       }
     }
 
-    if (event === EVENTS.GB && type === TYPE.WORLD && year === currentYear) {
-      return [
-        "https://wpra.com/pro-rodeo-world-standings/?svcUrl=pro-gb-world",
-        `https://wpra.com/pro-rodeo-world-standings-${currentYear}/`,
-        "https://wpra.com/pro-rodeo-world-standings/",
-      ];
-    }
-
-    if (event === EVENTS.GB && type === TYPE.ROOKIE && year === currentYear) {
-      return [
-        "https://wpra.com/wpra-resistol-rookie-barrels/?svcUrl=pro-gb-world-rk",
-        `https://wpra.com/wpra-resistol-rookie-barrels-${currentYear}/`,
-        `https://wpra.com/wpra-resistol-rookie-${currentYear}/`,
-      ];
-    }
-
-    if (event === EVENTS.LB && type === TYPE.WORLD && year === currentYear) {
-      return [
-        "https://wpra.com/pro-rodeo-breakaway-world-standings/?svcUrl=pro-lbk-world",
-        `https://wpra.com/pro-rodeo-breakaway-world-standings-${currentYear}/`,
-        "https://wpra.com/pro-rodeo-breakaway-world-standings/",
-      ];
-    }
-
-    if (event === EVENTS.LB && type === TYPE.ROOKIE && year === currentYear) {
-      return [
-        "https://wpra.com/wpra-resistol-rookie-breakaway/?svcUrl=pro-lbk-world-rk",
-        `https://wpra.com/wpra-resistol-rookie-breakaway-${currentYear}/`,
-      ];
-    }
-
-    if (event === EVENTS.GB && type === TYPE.CIRCUIT && year === currentYear) {
-      return [
-        ...(circuitSvcModifier
-          ? [
-              `https://wpra.com/pro-rodeo-circuit-standings/?svcUrl=pro-gb-${circuitSvcModifier}`,
-            ]
-          : []),
-        "https://wpra.com/pro-rodeo-circuit-standings/",
-        `https://wpra.com/pro-rodeo-circuit-standings-${modernCircuitSlug}-${currentYear}/`,
-      ];
-    }
-
-    if (event === EVENTS.LB && type === TYPE.CIRCUIT && year === currentYear) {
-      return [
-        ...(circuitSvcModifier
-          ? [
-              `https://wpra.com/pro-rodeo-breakaway-circuit-standings/?svcUrl=pro-lbk-${circuitSvcModifier}`,
-            ]
-          : []),
-        "https://wpra.com/pro-rodeo-breakaway-circuit-standings/",
-        `https://wpra.com/pro-rodeo-breakaway-circuit-standings-${modernCircuitSlug}-${currentYear}/`,
-      ];
+    // Modern pages default to the active season, which can be next calendar year.
+    // Always request an explicit season; never fall back to the unversioned page.
+    if (year >= 2026) {
+      const prefix = event === EVENTS.GB ? "pro-gb" : "pro-lbk";
+      const page = type === TYPE.ROOKIE
+        ? `wpra-resistol-rookie-${event === EVENTS.GB ? "barrels" : "breakaway"}`
+        : `pro-rodeo-${event === EVENTS.LB ? "breakaway-" : ""}${type === TYPE.CIRCUIT ? "circuit" : "world"}-standings`;
+      const modifier = type === TYPE.CIRCUIT ? circuitSvcModifier
+        : `world${type === TYPE.ROOKIE ? "-rk" : ""}`;
+      if (!modifier) return [];
+      return [`https://wpra.com/${page}/?standingYear=${year}&svcUrl=${prefix}-${modifier}`];
     }
 
     if (event === EVENTS.GB && type === TYPE.WORLD)
@@ -674,7 +654,11 @@ async function getWpra(event, type, year, circuit) {
   }
 
   const $ = cheerio.load(response.data);
-  const rows = $("table tr");
+  // Modern pages include duplicate desktop/mobile tables and unrelated tables.
+  // Validate the season attached to the data table, not years in navigation links.
+  const rows = year >= 2026
+    ? selectSeasonTable($, year).find("tr")
+    : $("table tr");
   const rawData = [];
 
   rows.each((i, row) => {
@@ -733,6 +717,10 @@ async function runAll() {
   assertDataSinkConfigured();
 
   const currentYear = new Date().getFullYear();
+  const endYear = Number(process.env.WPRA_SEASON_YEAR || await getActiveSeasonYear());
+  if (!Number.isInteger(endYear) || endYear < currentYear || endYear > currentYear + 1) {
+    throw new Error("WPRA_SEASON_YEAR must be the calendar year or the following season.");
+  }
   const startYearDefault = 2014;
   const lbStartYear = 2020;
   const forcedRefreshYears = new Set(
@@ -752,14 +740,15 @@ async function runAll() {
     const startYear = event === EVENTS.LB ? lbStartYear : startYearDefault;
     for (const type of types) {
       if (type === TYPE.CIRCUIT) {
-        totalTasks += circuits.length * (currentYear - startYear + 1);
+        totalTasks += circuits.length * (endYear - startYear + 1);
       } else {
-        totalTasks += currentYear - startYear + 1;
+        totalTasks += endYear - startYear + 1;
       }
     }
   }
 
   let completed = 0;
+  let failedTasks = 0;
 
   // Actual run
   for (const event of events) {
@@ -768,14 +757,14 @@ async function runAll() {
     for (const type of types) {
       if (type === TYPE.CIRCUIT) {
         for (const circuit of circuits) {
-          for (let year = startYear; year <= currentYear; year++) {
+          for (let year = startYear; year <= endYear; year++) {
             const filename = path.join(
               outputDir,
               `standings-year=${year}&type=${type}&id=${circuit.id}&event=${event}.json`,
             );
 
             if (
-              year !== currentYear &&
+              year < currentYear &&
               !forcedRefreshYears.has(year) &&
               hasExistingOutput(year, type, circuit.id, event)
             ) {
@@ -790,6 +779,13 @@ async function runAll() {
               year,
               circuit.title,
             );
+            if (error || !data.length) {
+              console.warn(`Preserving ${filename}: ${error || "empty standings"}`);
+              if ((year >= currentYear && error) || year === currentYear || forcedRefreshYears.has(year)) failedTasks++;
+              completed++;
+              await delay(DELAY_MS);
+              continue;
+            }
             const normalized = writeNormalizedPayload(filename, {
               error,
               data,
@@ -801,14 +797,14 @@ async function runAll() {
           }
         }
       } else {
-        for (let year = startYear; year <= currentYear; year++) {
+        for (let year = startYear; year <= endYear; year++) {
           const filename = path.join(
             outputDir,
             `standings-year=${year}&type=${type}&id=&event=${event}.json`,
           );
 
           if (
-            year !== currentYear &&
+            year < currentYear &&
             !forcedRefreshYears.has(year) &&
             hasExistingOutput(year, type, "", event)
           ) {
@@ -818,6 +814,13 @@ async function runAll() {
           }
 
           const { error, data } = await getWpra(event, type, year);
+          if (error || !data.length) {
+            console.warn(`Preserving ${filename}: ${error || "empty standings"}`);
+            if ((year >= currentYear && error) || year === currentYear || forcedRefreshYears.has(year)) failedTasks++;
+            completed++;
+            await delay(DELAY_MS);
+            continue;
+          }
           const normalized = writeNormalizedPayload(filename, { error, data });
           await upsertSupabaseRows(filename, normalized, athleteLookup);
           completed++;
@@ -828,13 +831,17 @@ async function runAll() {
     }
   }
 
+  if (failedTasks) throw new Error(`${failedTasks} standings requests failed; existing data preserved.`);
   process.stdout.write("\n🏁 All scraping complete!\n");
   normalizeExistingOutputFiles();
   writeTimestampHTML();
 }
 
 // ---- Run ----
-runAll().catch((err) => {
-  console.error(err);
-  process.exitCode = 1;
-});
+module.exports = { getWpra, selectSeasonTable, getActiveSeasonYear };
+if (require.main === module) {
+  runAll().catch((err) => {
+    console.error(err);
+    process.exitCode = 1;
+  });
+}
